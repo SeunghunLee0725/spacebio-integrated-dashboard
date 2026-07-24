@@ -1,0 +1,17 @@
+# systemd user 서비스 — 게이트웨이 상시 구동 (무인 운전 S6)
+# 설치: cp 하여 ~/.config/systemd/user/ 에 두고
+#   systemctl --user enable --now spacebio-gateway
+# 무인 운전 시 서스펜드 차단은 별도: systemd-inhibit 또는 전원 설정.
+[Unit]
+Description=Space-bio integration gateway
+After=network.target mosquitto.service
+
+[Service]
+Type=simple
+WorkingDirectory=%h/과제수행_KIMS/integration
+ExecStart=%h/과제수행_KIMS/integration/.venv/bin/python -m gateway.main
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target

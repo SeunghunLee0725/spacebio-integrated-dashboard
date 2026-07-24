@@ -1,0 +1,4 @@
+-r requirements.txt
+
+pytest-asyncio>=1.0,<2.0
+anyio>=4.6,<5.0

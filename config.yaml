@@ -1,0 +1,22 @@
+# 게이트웨이 설정 — 노트북 단독 (로컬 브로커)
+mqtt:
+  host: localhost
+  port: 1883
+  client_id: spacebio-gateway
+
+pump:
+  backend: null          # null | serial   (하드웨어 연결 시 serial)
+  serial_port: /dev/ttyUSB0
+  limits:
+    max_volume_ul: 1000.0
+    max_rate_ul_s: 200.0
+
+loop:
+  refractory_s: 30.0     # 트리거 재발동 최소 간격
+
+ble:
+  source: simulated      # simulated | bleak   (센서 노드 연결 시 bleak)
+  device_name: ResistanceSensor
+
+store:
+  db_path: ./data/gateway.sqlite

@@ -1,0 +1,12 @@
+.venv/
+data/
+__pycache__/
+*.pyc
+.pytest_cache/
+.worktrees/
+*.sqlite*
+deploy/baseline/*/
+deploy/releases/
+clinostat_extension/baseline/*/server.log
+*.env
+.omc/
