@@ -1,0 +1,149 @@
+{
+  "count": 36,
+  "routes": [
+    {
+      "method": "GET",
+      "path": "/"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ac/comm-test"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ac/connect"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ac/diagnose"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ac/disconnect"
+    },
+    {
+      "method": "GET",
+      "path": "/api/ac/feedback-debug"
+    },
+    {
+      "method": "POST",
+      "path": "/api/bldc/comm-test"
+    },
+    {
+      "method": "POST",
+      "path": "/api/bldc/connect"
+    },
+    {
+      "method": "POST",
+      "path": "/api/bldc/disconnect"
+    },
+    {
+      "method": "GET",
+      "path": "/api/camera/snapshot"
+    },
+    {
+      "method": "GET",
+      "path": "/api/camera/status"
+    },
+    {
+      "method": "GET",
+      "path": "/api/camera/stream"
+    },
+    {
+      "method": "POST",
+      "path": "/api/control/config"
+    },
+    {
+      "method": "POST",
+      "path": "/api/control/start"
+    },
+    {
+      "method": "GET",
+      "path": "/api/control/status"
+    },
+    {
+      "method": "POST",
+      "path": "/api/control/stop"
+    },
+    {
+      "method": "POST",
+      "path": "/api/experiment/run"
+    },
+    {
+      "method": "GET",
+      "path": "/api/experiment/status"
+    },
+    {
+      "method": "POST",
+      "path": "/api/experiment/stop"
+    },
+    {
+      "method": "POST",
+      "path": "/api/optimizer/start"
+    },
+    {
+      "method": "GET",
+      "path": "/api/optimizer/status"
+    },
+    {
+      "method": "POST",
+      "path": "/api/optimizer/stop"
+    },
+    {
+      "method": "GET",
+      "path": "/api/ports"
+    },
+    {
+      "method": "GET",
+      "path": "/api/ports/detect"
+    },
+    {
+      "method": "GET",
+      "path": "/api/research/{route_name}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/run/save"
+    },
+    {
+      "method": "POST",
+      "path": "/api/sensor/connect"
+    },
+    {
+      "method": "POST",
+      "path": "/api/sensor/disconnect"
+    },
+    {
+      "method": "GET",
+      "path": "/api/sphere"
+    },
+    {
+      "method": "GET",
+      "path": "/api/strategies"
+    },
+    {
+      "method": "POST",
+      "path": "/api/strategy"
+    },
+    {
+      "method": "GET",
+      "path": "/api/strategy/debug"
+    },
+    {
+      "method": "POST",
+      "path": "/api/strategy/debug/dry-run"
+    },
+    {
+      "method": "POST",
+      "path": "/api/strategy/debug/preflight"
+    },
+    {
+      "method": "GET",
+      "path": "/m"
+    },
+    {
+      "method": "GET",
+      "path": "/mobile"
+    }
+  ]
+}

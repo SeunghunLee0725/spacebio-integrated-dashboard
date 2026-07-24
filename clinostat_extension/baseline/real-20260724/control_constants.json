@@ -1,0 +1,70 @@
+{
+  "constants": {
+    "AC_COMMAND_SCALE": 1.0,
+    "AC_FEEDBACK_SIGN": 1.0,
+    "AC_GEAR_RATIO": 200,
+    "BLDC_GEAR_RATIO": 20,
+    "FEEDBACK_POLL_INTERVAL": 0.5,
+    "INNER_MAX_OUTPUT_RPM": 200.0,
+    "INNER_MAX_SLEW_RPM_S": 50.0,
+    "OUTER_MAX_OUTPUT_RPM": 60.0,
+    "OUTER_MAX_SLEW_RPM_S": 50.0
+  },
+  "extraction": "python-ast-toplevel-uppercase",
+  "mapping": {
+    "AC_COMMAND_SCALE": {
+      "line": 110,
+      "sha256": "944d726401aa49ec4e6e13eead40355cd7647114457075440f5520a5653d595e",
+      "source_file": "control_loop.py",
+      "source_name": "AC_COMMAND_SCALE"
+    },
+    "AC_FEEDBACK_SIGN": {
+      "line": 118,
+      "sha256": "944d726401aa49ec4e6e13eead40355cd7647114457075440f5520a5653d595e",
+      "source_file": "control_loop.py",
+      "source_name": "AC_FEEDBACK_SIGN"
+    },
+    "AC_GEAR_RATIO": {
+      "line": 105,
+      "sha256": "944d726401aa49ec4e6e13eead40355cd7647114457075440f5520a5653d595e",
+      "source_file": "control_loop.py",
+      "source_name": "AC_GEAR_RATIO"
+    },
+    "BLDC_GEAR_RATIO": {
+      "line": 106,
+      "sha256": "944d726401aa49ec4e6e13eead40355cd7647114457075440f5520a5653d595e",
+      "source_file": "control_loop.py",
+      "source_name": "BLDC_GEAR_RATIO"
+    },
+    "FEEDBACK_POLL_INTERVAL": {
+      "line": 115,
+      "sha256": "944d726401aa49ec4e6e13eead40355cd7647114457075440f5520a5653d595e",
+      "source_file": "control_loop.py",
+      "source_name": "FEEDBACK_POLL_INTERVAL"
+    },
+    "INNER_MAX_OUTPUT_RPM": {
+      "line": 112,
+      "sha256": "944d726401aa49ec4e6e13eead40355cd7647114457075440f5520a5653d595e",
+      "source_file": "control_loop.py",
+      "source_name": "INNER_MAX_OUTPUT_RPM"
+    },
+    "INNER_MAX_SLEW_RPM_S": {
+      "line": 114,
+      "sha256": "944d726401aa49ec4e6e13eead40355cd7647114457075440f5520a5653d595e",
+      "source_file": "control_loop.py",
+      "source_name": "INNER_MAX_SLEW_RPM_S"
+    },
+    "OUTER_MAX_OUTPUT_RPM": {
+      "line": 111,
+      "sha256": "944d726401aa49ec4e6e13eead40355cd7647114457075440f5520a5653d595e",
+      "source_file": "control_loop.py",
+      "source_name": "OUTER_MAX_OUTPUT_RPM"
+    },
+    "OUTER_MAX_SLEW_RPM_S": {
+      "line": 113,
+      "sha256": "944d726401aa49ec4e6e13eead40355cd7647114457075440f5520a5653d595e",
+      "source_file": "control_loop.py",
+      "source_name": "OUTER_MAX_SLEW_RPM_S"
+    }
+  }
+}

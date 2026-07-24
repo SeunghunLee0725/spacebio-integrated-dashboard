@@ -1,0 +1,24 @@
+{
+  "capture_method": "ssh key-auth read-only (scp/curl/ws), no remote mutation",
+  "captured_at": "2026-07-24T00:00:00Z",
+  "openapi_source": "http://100.77.1.42:8000/openapi.json",
+  "pi_hostname": "clinostat-pi",
+  "remote_actions": "read-only",
+  "service_active": "clinostat.service (running, unmodified)",
+  "sha256": {
+    "clinostat.service": "fcc7216095c606fb328b55323c0074a1ae3397da7382805fcc3cde9be6ad4895",
+    "control_constants.json": "15e8378af06c1ec5f86efdb9bc25e0510cc2ccb51fb541d1aca8d336cce577f8",
+    "control_loop.py": "944d726401aa49ec4e6e13eead40355cd7647114457075440f5520a5653d595e",
+    "dom_ids.json": "9e9d625853679b09e4e2673a506f8fdfa0ca1127c48d86c6d8f5582004beb450",
+    "openapi.json": "0467686002c6ec215ecf2f13263760450a59eeed58bebca3975c0c825dc2050a",
+    "routes.json": "30d661f6bbd41c02055778c4a0334b8e40d0544b687fed4b97c19e38d46f11b9",
+    "server.py": "b99f134690e277a35038cc686d185250de50e5c94b914faa481b8e8a5d161966",
+    "static/index.html": "baadb741d7f63e166818521737f4e8c2db40928bd38b9ff0202673a55b63b249",
+    "websocket_keys.json": "8792edfd4c49947e68014d08d0991951cae148b04538b15871c0205e61fb31c6"
+  },
+  "source_host": "aiworker-1@100.77.1.42",
+  "source_path": "/home/aiworker-1/clinostat",
+  "source_revision": "ed6e8ad1fe52ec1baaea119f6f78223d53666694",
+  "websocket_observed_seconds": 20.0,
+  "websocket_path": "/ws"
+}

@@ -1,3 +1,0 @@
-{"loop_timing":{"loop_timing_ms":{"nullable":false,"type":"number"}},"offset_seconds":0.0,"schema":{"loop_timing_ms":{"nullable":false,"type":"number"},"running":{"nullable":false,"type":"boolean"}}}
-{"loop_timing":{"loop_timing_ms":{"nullable":false,"type":"number"}},"offset_seconds":1.0,"schema":{"loop_timing_ms":{"nullable":false,"type":"number"},"running":{"nullable":false,"type":"boolean"}}}
-{"loop_timing":{"loop_timing_ms":{"nullable":false,"type":"number"}},"offset_seconds":2.0,"schema":{"loop_timing_ms":{"nullable":false,"type":"number"},"running":{"nullable":false,"type":"boolean"}}}
