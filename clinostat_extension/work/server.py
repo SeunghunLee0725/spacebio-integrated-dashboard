@@ -10,6 +10,6 @@ async def control_status():
     return {"running": False, "loop_timing_ms": None}
 
 
-@app.websocket("/ws/control")
+@app.websocket("/ws")
 async def control_stream(websocket: WebSocket):
     return None

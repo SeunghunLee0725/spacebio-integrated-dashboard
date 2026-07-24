@@ -11,7 +11,13 @@ arguments or stored by this repository.
 
 Live capture requires local `websocat` and at least one of `gitleaks` or
 `trufflehog`. The WebSocket route is discovered from the captured Python/HTML
-sources and observed through a local SSH port forward. Status is read three
+sources and observed through a local SSH port forward. A portable Python
+supervisor measures the monotonic observation duration, rejects early client
+exit, and requires both 55 seconds of observation and three messages. Production
+Python sources are obtained from a bounded recursive manifest; backups, run
+data, caches, Git metadata, and tests are excluded. Required control symbols are
+resolved uniquely by AST and every constant/calculation records source path,
+line, and SHA-256. Status is read three
 times from `/api/control/status`; neither observation starts or changes control
 hardware. Publication is fail-closed: raw evidence is scanned first, sanitized
 output is built in a temporary sibling, rescanned, hashed, and atomically moved.

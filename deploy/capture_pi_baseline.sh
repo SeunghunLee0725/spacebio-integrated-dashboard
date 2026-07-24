@@ -42,11 +42,27 @@ ssh "${ssh_opts[@]}" "$target" "curl --fail --silent http://127.0.0.1:8000/opena
 scp "${ssh_opts[@]}" "$target:$remote/server.py" "$raw/server.py"
 scp "${ssh_opts[@]}" "$target:$remote/static/index.html" "$raw/static/index.html"
 scp "${ssh_opts[@]}" "$target:/etc/systemd/system/clinostat.service" "$raw/clinostat.service"
-for source_name in control_loop.py strategies.py metrics.py; do
-  if ssh "${ssh_opts[@]}" "$target" "test -f '$remote/$source_name'"; then
-    scp "${ssh_opts[@]}" "$target:$remote/$source_name" "$raw/$source_name"
-  fi
-done
+ssh "${ssh_opts[@]}" "$target" \
+  "cd '$remote' && find . -type d \\( -name .git -o -name __pycache__ -o -name runs -o -name backups -o -name tests \\) -prune -o -type f -name '*.py' -print | LC_ALL=C sort | head -n 201" \
+  >"$raw/python_manifest.txt"
+[[ "$(wc -l <"$raw/python_manifest.txt" | tr -d ' ')" -le 200 ]] || {
+  echo "Python source manifest exceeds the 200-file safety bound" >&2
+  exit 2
+}
+mkdir -p "$raw/sources"
+while IFS= read -r source_name; do
+  [[ "$source_name" =~ ^\./[A-Za-z0-9_./-]+\.py$ ]] || {
+    echo "unsafe Python source path in manifest: $source_name" >&2
+    exit 2
+  }
+  relative_name="${source_name#./}"
+  mkdir -p "$raw/sources/$(dirname "$relative_name")"
+  scp "${ssh_opts[@]}" "$target:$remote/$relative_name" "$raw/sources/$relative_name"
+done <"$raw/python_manifest.txt"
+[[ -n "$(find "$raw/sources" -type f -name '*.py' -print -quit)" ]] || {
+  echo "Python source manifest was empty" >&2
+  exit 2
+}
 
 ws_path="$("$repo_root/deploy/build_pi_baseline.py" --discover-ws \
   "$raw/server.py" "$raw/static/index.html")"
@@ -54,15 +70,22 @@ command -v websocat >/dev/null || {
   echo "websocat is required locally for dependency-free WebSocket capture" >&2
   exit 2
 }
+ws_target_seconds=60
+ws_minimum_seconds=55
+if [[ "${CAPTURE_TEST_SHORT_WS:-0}" == 1 ]]; then
+  [[ "$PI_HOST" == "fixture.invalid" ]] || {
+    echo "short WebSocket clock is restricted to the fixture.invalid test host" >&2
+    exit 2
+  }
+  ws_target_seconds=1
+  ws_minimum_seconds=0.5
+fi
 ssh "${ssh_opts[@]}" -N -L 127.0.0.1:18080:127.0.0.1:8000 "$target" &
 tunnel_pid=$!
 sleep 1
-if ! timeout 60 websocat "ws://127.0.0.1:18080$ws_path" >"$raw/websocket_samples.jsonl"; then
-  [[ -s "$raw/websocket_samples.jsonl" ]] || {
-    echo "bounded WebSocket capture failed without any messages" >&2
-    exit 2
-  }
-fi
+"$repo_root/deploy/build_pi_baseline.py" --capture-ws \
+  "$raw/websocket_samples.jsonl" "$raw/ws_capture.json" \
+  "ws://127.0.0.1:18080$ws_path" "$ws_target_seconds" "$ws_minimum_seconds" 3
 command kill "$tunnel_pid" 2>/dev/null || true
 tunnel_pid=""
 

@@ -29,6 +29,7 @@ def test_capture_uses_actual_status_route_and_never_old_route():
     text = SCRIPT.read_text()
     assert "/api/control/status" in text
     assert "8000/api/status" not in text
+    assert "timeout 60" not in text
     assert "StrictHostKeyChecking=yes" in text
     forbidden = ("systemctl start", "systemctl restart", "sudo ", "reboot")
     assert not any(command in text for command in forbidden)
@@ -67,6 +68,7 @@ command = sys.argv[-1]
 if "git rev-parse" in command: print("a" * 40)
 elif "openapi.json" in command: print('{"openapi":"3.1.0","paths":{"/api/control/status":{}}}')
 elif "/api/control/status" in command: print('{"running":false,"loop_timing_ms":10.0}')
+elif "find ." in command: print("./control_loop.py")
 elif "test -f" in command: raise SystemExit(0 if "control_loop.py" in command else 1)
 """)
     _executable(tools / "scp", """#!/usr/bin/env python3
@@ -84,11 +86,17 @@ else: path.write_text("[Service]\\n")
 """)
     _executable(tools / "websocat", """#!/usr/bin/env python3
 print('{"running":false}')
+print('{"running":false}')
+print('{"running":false}', flush=True)
+import time
+time.sleep(3)
 """)
     _executable(tools / "gitleaks", """#!/usr/bin/env python3
 import pathlib, sys
 root = pathlib.Path(sys.argv[sys.argv.index("--source") + 1])
-raise SystemExit(1 if any("API_PASSWORD" in p.read_text(errors="ignore") for p in root.rglob("*") if p.is_file()) else 0)
+found = any("API_PASSWORD" in p.read_text(errors="ignore") for p in root.rglob("*") if p.is_file())
+if found: print("fixture scanner detected secret", file=sys.stderr)
+raise SystemExit(1 if found else 0)
 """)
     result = subprocess.run(
         ["bash", str(repo / "deploy/capture_pi_baseline.sh")],
@@ -96,10 +104,12 @@ raise SystemExit(1 if any("API_PASSWORD" in p.read_text(errors="ignore") for p i
             **os.environ, "PATH": f"{tools}:{os.environ['PATH']}",
             "PI_HOST": "fixture.invalid", "PI_USER": "fixture",
             "CAPTURE_TIMESTAMP": "secret-case",
+            "CAPTURE_TEST_SHORT_WS": "1",
         },
         text=True, capture_output=True, timeout=15,
     )
     assert result.returncode != 0
+    assert "fixture scanner detected secret" in result.stderr
     assert not (repo / "clinostat_extension/baseline/sanitized/secret-case").exists()
     assert sentinel.read_text() == "unchanged\n"
 
@@ -112,14 +122,14 @@ def _executable(path: Path, text: str) -> None:
 def test_websocket_path_discovery_accepts_one_literal_route(tmp_path):
     (tmp_path / "server.py").write_text(
         "from fastapi import FastAPI, WebSocket\napp=FastAPI()\n"
-        "@app.websocket('/ws/control')\nasync def stream(ws: WebSocket): pass\n"
+        "@app.websocket('/ws')\nasync def stream(ws: WebSocket): pass\n"
     )
     (tmp_path / "index.html").write_text(
-        "<script>new WebSocket(`ws://${location.host}/ws/control`)</script>"
+        "<script>new WebSocket(`ws://${location.host}/ws`)</script>"
     )
     assert builder.discover_websocket_path(
         tmp_path / "server.py", tmp_path / "index.html"
-    ) == "/ws/control"
+    ) == "/ws"
 
 
 @pytest.mark.parametrize(
@@ -140,38 +150,118 @@ def test_websocket_path_discovery_rejects_missing_or_ambiguous(tmp_path, server,
         builder.discover_websocket_path(tmp_path / "server.py", tmp_path / "index.html")
 
 
-def test_realistic_control_source_extracts_named_constants_and_golden(tmp_path):
-    source = tmp_path / "control_loop.py"
+def test_recursive_control_source_extracts_actual_symbols_and_goldens(tmp_path):
+    source = tmp_path / "app/control/control_loop.py"
+    source.parent.mkdir(parents=True)
     source.write_text(
-        "GEAR_RATIO = 100.0\nENCODER_PULSES_PER_REV = 12\n"
-        "CONTROL_LOOP_INTERVAL_S = 0.1\nMAX_MOTOR_RPM = 120.0\n"
-        "def motor_rpm(axis_rpm):\n    return axis_rpm * GEAR_RATIO\n"
+        "AC_GEAR_RATIO=200\nBLDC_GEAR_RATIO=20\n"
+        "OUTER_MAX_OUTPUT_RPM=60.0\nINNER_MAX_OUTPUT_RPM=200.0\n"
+        "OUTER_MAX_SLEW_RPM_S=50.0\nINNER_MAX_SLEW_RPM_S=50.0\n"
+        "def _ac_feedback_output_rpm(motor_rpm):\n return motor_rpm / AC_GEAR_RATIO\n"
+        "def _ac_command_motor_rpm(output_rpm):\n return output_rpm * AC_GEAR_RATIO\n"
+        "def _slew_limit(current, target, max_delta):\n"
+        " return max(current-max_delta, min(current+max_delta, target))\n"
     )
-    constants = builder.extract_control_constants([source])
+    constants = builder.extract_control_constants([source], root=tmp_path)
     assert constants["constants"] == {
-        "CONTROL_LOOP_INTERVAL_S": 0.1,
-        "ENCODER_PULSES_PER_REV": 12,
-        "GEAR_RATIO": 100.0,
-        "MAX_MOTOR_RPM": 120.0,
+        "AC_GEAR_RATIO": 200, "BLDC_GEAR_RATIO": 20,
+        "INNER_MAX_OUTPUT_RPM": 200.0, "INNER_MAX_SLEW_RPM_S": 50.0,
+        "OUTER_MAX_OUTPUT_RPM": 60.0, "OUTER_MAX_SLEW_RPM_S": 50.0,
     }
-    assert all(item["source_file"] == "control_loop.py" for item in constants["mapping"].values())
-    golden = builder.extract_control_golden([source], constants)
-    assert golden["source"]["file"] == "control_loop.py"
-    assert golden["source"]["function"] == "motor_rpm"
-    assert golden["source"]["line"] == 5
-    assert len(golden["source"]["sha256"]) == 64
-    assert golden["cases"][1] == {"input": {"axis_rpm": 1.0}, "output": 100.0}
+    assert all(item["source_file"] == "app/control/control_loop.py"
+               for item in constants["mapping"].values())
+    golden = builder.extract_control_golden([source], constants, root=tmp_path)
+    assert {item["source"]["function"] for item in golden["calculations"]} == {
+        "_ac_command_motor_rpm", "_slew_limit"
+    }
+    command = next(item for item in golden["calculations"]
+                   if item["source"]["function"] == "_ac_command_motor_rpm")
+    assert command["cases"][1] == {"input": {"output_rpm": 1.0}, "output": 200.0}
 
 
 def test_control_extraction_fails_without_exact_pure_formula(tmp_path):
     source = tmp_path / "control_loop.py"
     source.write_text(
-        "GEAR_RATIO=100.0\nENCODER_PULSES_PER_REV=12\n"
-        "CONTROL_LOOP_INTERVAL_S=0.1\nMAX_MOTOR_RPM=120.0\n"
+        "AC_GEAR_RATIO=200\nBLDC_GEAR_RATIO=20\n"
+        "OUTER_MAX_OUTPUT_RPM=60.0\nINNER_MAX_OUTPUT_RPM=200.0\n"
+        "OUTER_MAX_SLEW_RPM_S=50.0\nINNER_MAX_SLEW_RPM_S=50.0\n"
     )
     constants = builder.extract_control_constants([source])
     with pytest.raises(builder.ContractError, match="safe pure control calculation"):
         builder.extract_control_golden([source], constants)
+
+
+def test_control_symbol_resolution_rejects_ambiguity_and_missing(tmp_path):
+    first = tmp_path / "a.py"
+    second = tmp_path / "nested/b.py"
+    second.parent.mkdir()
+    body = (
+        "AC_GEAR_RATIO=200\nBLDC_GEAR_RATIO=20\n"
+        "OUTER_MAX_OUTPUT_RPM=60.0\nINNER_MAX_OUTPUT_RPM=200.0\n"
+        "OUTER_MAX_SLEW_RPM_S=50.0\nINNER_MAX_SLEW_RPM_S=50.0\n"
+    )
+    first.write_text(body)
+    second.write_text("AC_GEAR_RATIO=201\n")
+    with pytest.raises(builder.ContractError, match="ambiguous control constant"):
+        builder.extract_control_constants([first, second], root=tmp_path)
+    second.write_text("")
+    first.write_text(body.replace("BLDC_GEAR_RATIO=20\n", ""))
+    with pytest.raises(builder.ContractError, match="required real control constants absent"):
+        builder.extract_control_constants([first, second], root=tmp_path)
+
+
+def test_ws_duration_validation_rejects_early_exit_and_short_capture():
+    with pytest.raises(builder.ContractError, match="exited before observation deadline"):
+        builder.validate_ws_capture(
+            elapsed_seconds=2.0, target_seconds=60.0, minimum_seconds=55.0,
+            message_count=10, minimum_messages=3, exited_early=True,
+        )
+    with pytest.raises(builder.ContractError, match="shorter than required"):
+        builder.validate_ws_capture(
+            elapsed_seconds=54.9, target_seconds=60.0, minimum_seconds=55.0,
+            message_count=10, minimum_messages=3, exited_early=False,
+        )
+    builder.validate_ws_capture(
+        elapsed_seconds=55.0, target_seconds=60.0, minimum_seconds=55.0,
+        message_count=3, minimum_messages=3, exited_early=False,
+    )
+
+
+def test_ws_supervisor_uses_injected_clock_and_rejects_early_normal_exit(tmp_path):
+    class EarlyProcess:
+        def poll(self): return 0
+
+    clock = iter((0.0, 1.0, 1.0))
+    with pytest.raises(builder.ContractError, match="exited before observation deadline"):
+        builder.capture_websocket(
+            tmp_path / "messages.jsonl", tmp_path / "metadata.json",
+            "ws://fixture/ws", 60.0, 55.0, 3,
+            _clock=lambda: next(clock), _sleep=lambda _seconds: None,
+            _popen=lambda _args, stdout: EarlyProcess(),
+        )
+    assert not (tmp_path / "metadata.json").exists()
+
+
+def test_ws_supervisor_records_injected_full_duration(tmp_path):
+    class TimedProcess:
+        def __init__(self, stream):
+            stream.write('{"a":1}\n{"a":2}\n{"a":3}\n')
+            self.running = True
+        def poll(self): return None if self.running else -15
+        def terminate(self): self.running = False
+        def wait(self, timeout=None): return -15
+        def kill(self): self.running = False
+
+    clock = iter((0.0, 60.0, 60.001))
+    metadata = tmp_path / "metadata.json"
+    builder.capture_websocket(
+        tmp_path / "messages.jsonl", metadata, "ws://fixture/ws", 60.0, 55.0, 3,
+        _clock=lambda: next(clock), _sleep=lambda _seconds: None,
+        _popen=lambda _args, stdout: TimedProcess(stdout),
+    )
+    recorded = json.loads(metadata.read_text())
+    assert recorded["actual_duration_seconds"] == 60.001
+    assert recorded["message_count"] == 3
 
 
 def test_status_sanitization_requires_count_and_object_schema():
@@ -197,13 +287,19 @@ def test_committed_fixture_models_known_contract():
     assert "/api/control/status" in openapi["paths"]
     assert "/api/status" not in openapi["paths"]
     ws = json.loads((capture / "websocket_schema.json").read_text())
-    assert ws["path"] == "/ws/control"
+    assert ws["path"] == "/ws"
+    assert ws["actual_duration_seconds"] >= ws["minimum_duration_seconds"]
     constants = json.loads((capture / "control_constants.json").read_text())
-    assert {"GEAR_RATIO", "ENCODER_PULSES_PER_REV", "CONTROL_LOOP_INTERVAL_S",
-            "MAX_MOTOR_RPM"} == set(constants["constants"])
+    assert {
+        "AC_GEAR_RATIO", "BLDC_GEAR_RATIO", "OUTER_MAX_OUTPUT_RPM",
+        "INNER_MAX_OUTPUT_RPM", "OUTER_MAX_SLEW_RPM_S", "INNER_MAX_SLEW_RPM_S",
+    } == set(constants["constants"])
+    assert constants["constants"]["AC_GEAR_RATIO"] == 200
     assert not {"TARGET_RPM", "KP", "KI"} & set(constants["constants"])
     golden = json.loads((capture / "control_golden.json").read_text())
-    assert set(golden["source"]) == {"file", "function", "line", "sha256"}
+    assert {c["source"]["function"] for c in golden["calculations"]} == {
+        "_ac_command_motor_rpm", "_slew_limit"
+    }
     samples = (capture / "status_samples.sanitized.jsonl").read_text().splitlines()
     assert len(samples) >= 3
     assert json.loads((capture / "capture.json").read_text())["status_minimum_samples"] == 3
