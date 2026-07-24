@@ -83,7 +83,19 @@ BaselineOhm = Annotated[float, Field(ge=1_000.0, le=10_000_000.0, allow_inf_nan=
 PeriodS = Annotated[float, Field(ge=0.5, le=3600.0, allow_inf_nan=False)]
 TemperatureC = Annotated[float, Field(ge=0.0, le=60.0, allow_inf_nan=False)]
 BatteryPct = Annotated[int, Field(ge=0, le=100)]
-RawAdc = Annotated[int, Field(ge=0, le=4095)]
+
+#: 실제 센서 노드는 **ADS1115(16비트 차동)**라 raw ADC가 음수를 포함한 int16
+#: 전 범위를 쓴다. ThinkPad 실측 세션에서 확인된 실제 범위는 -13263~12985다.
+#: 스펙 6.3의 "0-4095"는 합성 생성기가 divider 역변환 결과를 clamp할 때 쓰는
+#: **config 기본값**(SYNTHETIC_ADC_FULL_SCALE)이지 공용 저장 스키마의 제약이
+#: 아니다. 여기에 4095를 걸면 실측 CSV 재생이 전부 거부된다.
+RAW_ADC_MIN = -32768
+RAW_ADC_MAX = 32767
+RawAdc = Annotated[int, Field(ge=RAW_ADC_MIN, le=RAW_ADC_MAX)]
+
+#: 합성 소스가 divider 역변환 결과를 clamp하는 기본 full-scale (스펙 6.3).
+SYNTHETIC_ADC_FULL_SCALE = 4095
+SYNTHETIC_REFERENCE_RESISTOR_OHM = 82_500.0
 RequestId = Annotated[str, Field(min_length=1, max_length=128)]
 
 

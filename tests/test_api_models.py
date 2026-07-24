@@ -357,12 +357,63 @@ def test_sensor_sample_carries_the_stored_fields():
     assert sample.model_dump()["raw_adc"] == 2041
 
 
-@pytest.mark.parametrize("adc", [-1, 4096])
-def test_sensor_sample_rejects_adc_outside_full_scale(adc):
+def _sample(**overrides):
+    payload = dict(
+        source_timestamp_ms=0, session_elapsed_ms=0, loop_count=0, raw_adc=0,
+        resistance_ohm=1.0, delta_r_over_r0=0.0, temperature_c=25.0, battery_pct=50,
+    )
+    payload.update(overrides)
+    return m.SensorSample(**payload)
+
+
+@pytest.mark.parametrize("adc", [-32768, -13263, 0, 2041, 12985, 32767])
+def test_sensor_sample_accepts_signed_int16_adc(adc):
+    """센서 노드는 ADS1115(16비트 차동)라 raw_adc가 음수와 4095 초과를 포함한다.
+
+    실측값 -13263 / 12985가 여기 들어 있다 — 0-4095로 제한하면 실측 CSV
+    재생이 전부 거부된다(2026-07-24 실제로 발생).
+    """
+    assert _sample(raw_adc=adc).raw_adc == adc
+
+
+@pytest.mark.parametrize("adc", [-32769, 32768])
+def test_sensor_sample_rejects_adc_outside_int16(adc):
     with pytest.raises(ValidationError):
+        _sample(raw_adc=adc)
+
+
+def test_synthetic_adc_full_scale_is_config_default_not_schema_bound():
+    """스펙 6.3의 0-4095는 합성 생성기 clamp용 기본값이지 저장 스키마 제약이 아니다."""
+    assert m.SYNTHETIC_ADC_FULL_SCALE == 4095
+    assert m.RAW_ADC_MAX > m.SYNTHETIC_ADC_FULL_SCALE
+    _sample(raw_adc=m.SYNTHETIC_ADC_FULL_SCALE + 1)      # 스키마는 거부하지 않는다
+
+
+def test_real_thinkpad_dataset_round_trips_through_sensor_sample():
+    """실측 CSV 전체가 SensorSample을 통과하는지 확인한다.
+
+    합성 fixture만으로는 못 잡는다 — 실제 데이터로 확인해야 하는 회귀 테스트.
+    """
+    import csv as _csv
+    from pathlib import Path
+
+    dataset = (Path(__file__).resolve().parents[1]
+               / "datasets" / "thinkpad_20260714_172138_ble_test.csv")
+    if not dataset.exists():
+        pytest.skip("실측 dataset이 반입되지 않음")
+
+    with dataset.open(newline="", encoding="utf-8") as handle:
+        rows = [r for r in _csv.DictReader(handle) if any(v.strip() for v in r.values())]
+
+    assert rows, "실측 dataset이 비어 있다"
+    for index, row in enumerate(rows):
         m.SensorSample(
-            source_timestamp_ms=0, session_elapsed_ms=0, loop_count=0, raw_adc=adc,
-            resistance_ohm=1.0, delta_r_over_r0=0.0, temperature_c=25.0, battery_pct=50,
+            source_timestamp_ms=int(row["timestamp_ms"]), session_elapsed_ms=index,
+            loop_count=0, raw_adc=int(row["raw_adc"]),
+            resistance_ohm=float(row["resistance_ohm"]),
+            delta_r_over_r0=float(row["delta_r_over_r0"]),
+            temperature_c=float(row["temperature_c"]),
+            battery_pct=int(row["battery_pct"]),
         )
 
 
