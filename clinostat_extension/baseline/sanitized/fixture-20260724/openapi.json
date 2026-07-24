@@ -1,0 +1,9 @@
+{
+  "openapi": "3.1.0",
+  "info": {"title": "Clinostat fixture contract", "version": "0"},
+  "paths": {
+    "/": {"get": {"responses": {"200": {"description": "UI"}}}},
+    "/api/status": {"get": {"responses": {"200": {"description": "Status"}}}},
+    "/ws": {"get": {"responses": {"101": {"description": "WebSocket"}}}}
+  }
+}

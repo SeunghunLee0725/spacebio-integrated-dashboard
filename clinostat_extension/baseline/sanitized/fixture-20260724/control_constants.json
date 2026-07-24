@@ -1,0 +1,10 @@
+{
+  "extraction": "python-ast-explicit-allowlist",
+  "required": ["KI", "KP", "TARGET_RPM"],
+  "constants": {"KI": 0.05, "KP": 0.5, "TARGET_RPM": 10.0},
+  "name_mapping": {
+    "KI": {"source_name": "KI", "justification": "exact fixture source name"},
+    "KP": {"source_name": "KP", "justification": "exact fixture source name"},
+    "TARGET_RPM": {"source_name": "TARGET_RPM", "justification": "exact fixture source name"}
+  }
+}

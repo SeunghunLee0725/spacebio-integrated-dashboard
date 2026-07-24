@@ -1,0 +1,6 @@
+[Unit]
+Description=Clinostat application fixture
+
+[Service]
+WorkingDirectory=/home/aiworker-1/clinostat
+ExecStart=/usr/bin/python3 /home/aiworker-1/clinostat/server.py

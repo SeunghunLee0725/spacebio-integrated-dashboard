@@ -1,0 +1,8 @@
+{
+  "captured_at": "fixture-20260724",
+  "source_path": "/home/aiworker-1/clinostat",
+  "source_revision": "fixture-not-live",
+  "remote_actions": "read-only",
+  "websocket_window_seconds": 60,
+  "limitation": "Fake SSH fixture; live interactive authentication was not attempted."
+}
