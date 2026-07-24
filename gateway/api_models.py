@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import re
+import uuid
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Annotated, Any, Literal, Optional, Union
@@ -99,12 +100,22 @@ SYNTHETIC_REFERENCE_RESISTOR_OHM = 82_500.0
 RequestId = Annotated[str, Field(min_length=1, max_length=128)]
 
 
+def new_request_id() -> str:
+    return str(uuid.uuid4())
+
+
 class _Request(BaseModel):
-    """모든 변경 요청의 기반 — unknown field 금지."""
+    """모든 변경 요청의 기반 — unknown field 금지.
+
+    `request_id`는 **선택**이다. 스펙 6장은 "모든 변경 요청에는 요청 ID를
+    허용한다"이지 요구한다가 아니다. 브라우저는 `X-Request-ID` 헤더로만 보내고
+    본문에는 넣지 않으므로(스펙 6.1), 필수로 두면 화면에서 오는 모든 변경
+    요청이 422가 된다 — 2026-07-24 종단 스모크에서 실제로 발생했다.
+    """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    request_id: RequestId
+    request_id: RequestId = Field(default_factory=new_request_id)
 
 
 class _Status(BaseModel):
