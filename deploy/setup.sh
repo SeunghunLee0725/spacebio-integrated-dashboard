@@ -1,10 +1,15 @@
 #!/usr/bin/env bash
-# S0 부트스트랩 — Linux 노트북 단독 환경 구축
+# 부트스트랩 — venv + 의존성. 기본 대상은 라즈베리파이 clinostat-pi.
 # 사용: bash integration/deploy/setup.sh
+#
+# MQTT 브로커와 Flutter 데스크톱 빌드 의존성은 DEC-012로 1차 마일스톤 런타임
+# 경로에서 빠졌다. 되살리려면 SPACEBIO_WITH_MQTT=1 로 실행한다.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 echo "==> integration root: $HERE"
+
+WITH_MQTT="${SPACEBIO_WITH_MQTT:-0}"
 
 PLATFORM_OS="$(uname -s)"
 PLATFORM_ARCH="$(uname -m)"
@@ -12,6 +17,10 @@ PYTHON_MINOR="$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.ve
 case "$PLATFORM_OS:$PLATFORM_ARCH:$PYTHON_MINOR" in
   Darwin:arm64:3.14)
     CONSTRAINTS="$HERE/constraints-macos-arm64-py314-dev.txt"
+    ;;
+  Linux:aarch64:3.13)
+    # clinostat-pi 실측: Raspberry Pi OS, Python 3.13.5, aarch64
+    CONSTRAINTS="$HERE/constraints-linux-aarch64-py313.txt"
     ;;
   Linux:aarch64:3.11)
     CONSTRAINTS="$HERE/constraints-linux-aarch64-py311.txt"
@@ -24,12 +33,17 @@ esac
 echo "==> verified constraints: $CONSTRAINTS"
 
 if [[ "$PLATFORM_OS" == "Linux" ]]; then
-  echo "==> apt 패키지 설치 (mosquitto, Flutter Linux 빌드 의존성)"
+  echo "==> apt 패키지 설치 (venv/pip)"
+  APT_PACKAGES=(python3-venv python3-pip)
+  if [[ "$WITH_MQTT" == "1" ]]; then
+    echo "    (SPACEBIO_WITH_MQTT=1 → mosquitto + Flutter 빌드 의존성 포함)"
+    APT_PACKAGES+=(
+      mosquitto mosquitto-clients
+      clang cmake ninja-build pkg-config libgtk-3-dev
+    )
+  fi
   sudo apt-get update
-  sudo apt-get install -y \
-    mosquitto mosquitto-clients \
-    python3-venv python3-pip \
-    clang cmake ninja-build pkg-config libgtk-3-dev
+  sudo apt-get install -y "${APT_PACKAGES[@]}"
 
   echo "==> 펌프 시리얼 권한: $USER 를 dialout 그룹에 추가 (재로그인 필요)"
   sudo usermod -aG dialout "$USER" || true
@@ -42,15 +56,18 @@ source "$HERE/.venv/bin/activate"
 pip install --upgrade pip
 pip install -r "$HERE/requirements.txt" -c "$CONSTRAINTS"
 
-if [[ "$PLATFORM_OS" == "Linux" ]]; then
+if [[ "$PLATFORM_OS" == "Linux" && "$WITH_MQTT" == "1" ]]; then
   echo "==> Mosquitto 로컬 설정 적용"
   sudo cp "$HERE/deploy/mosquitto.conf" /etc/mosquitto/conf.d/spacebio.conf
   sudo systemctl enable --now mosquitto
-else
-  echo "==> macOS: Mosquitto/시스템 서비스 설치는 건너뜀"
 fi
 
 echo
-echo "완료. 다음으로 S0 게이트 확인:"
+echo "완료. Gateway 구동 확인:"
 echo "  source $HERE/.venv/bin/activate"
-echo "  cd $HERE && python -m gateway.main --self-test"
+echo "  cd $HERE && python -m uvicorn gateway.app:app --host 127.0.0.1 --port 8010"
+if [[ "$WITH_MQTT" == "1" ]]; then
+  echo
+  echo "MQTT 경로(동결, DEC-012) 자체 점검:"
+  echo "  cd $HERE && python -m gateway.main --self-test"
+fi

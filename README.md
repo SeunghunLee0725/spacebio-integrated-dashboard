@@ -27,17 +27,39 @@ integration/
 ## Python 및 의존성
 
 소스의 지원 범위는 **Python 3.10 이상, 3.15 미만**이다. 재현 가능한
-설치는 현재 검증된 다음 두 환경으로 제한된다.
+설치는 현재 검증된 다음 환경으로 제한된다.
 
 - macOS arm64, Python 3.14:
   `constraints-macos-arm64-py314-dev.txt`
-- Raspberry Pi Linux aarch64, Python 3.11:
-  `constraints-linux-aarch64-py311.txt`
+- **Raspberry Pi `clinostat-pi` 실측 환경 — Linux aarch64, Python 3.13:
+  `constraints-linux-aarch64-py313.txt`** ← 배포 대상
+- Linux aarch64, Python 3.11: `constraints-linux-aarch64-py311.txt`
+  (실기 검증되지 않음. 파이를 3.11로 재이미징할 경우에만 사용)
+
+> ⚠ 초기 계획은 파이를 Python 3.11로 가정했으나 **실제 `clinostat-pi`는
+> Python 3.13.5**다(2026-07-24 확인). 3.13 잠금 파일은 파이의 venv에서
+> `pip install --dry-run`으로 21개 패키지가 모두 해결되는 것을 확인했다.
+> 파이의 시스템 Python은 PEP 668 externally-managed이므로 **반드시 venv를
+> 쓴다.** `--break-system-packages`를 쓰지 마라.
 
 `deploy/setup.sh`는 운영체제, 아키텍처, Python 마이너 버전을 검사해 정확한
 파일만 선택하며, 검증된 조합이 아니면 시스템을 변경하기 전에 종료한다.
 Pi에서는 Linux aarch64 잠금 파일을 사용하며 Bleak의 Linux 의존성
 `dbus-fast`도 고정되어 있다.
+
+`setup.sh`는 기본적으로 venv와 의존성만 만든다. Mosquitto 브로커와 Flutter
+데스크톱 빌드 의존성은 [[DEC-012]]로 1차 런타임 경로에서 빠졌으므로
+`SPACEBIO_WITH_MQTT=1`로 실행할 때만 설치된다.
+
+Pi 잠금 갱신은 macOS의 `pip freeze`로 하지 않는다. `uv`로 대상 플랫폼을
+지정해 컴파일한다.
+
+```bash
+UV_CUSTOM_COMPILE_COMMAND='uv pip compile requirements.txt --python-platform aarch64-manylinux_2_17 --python-version 3.13 --only-binary :all: --output-file constraints-linux-aarch64-py313.txt' \
+uv pip compile requirements.txt \
+  --python-platform aarch64-manylinux_2_17 --python-version 3.13 \
+  --only-binary :all: --output-file constraints-linux-aarch64-py313.txt
+```
 
 FastAPI, Uvicorn, Pydantic, HTTPX는 다음 게이트웨이 API 단계에 필요한
 런타임 기반이므로 유지한다. Bleak도 현재 `gateway.ble_source`가 제공하는
