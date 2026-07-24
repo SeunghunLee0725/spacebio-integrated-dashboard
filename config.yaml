@@ -8,7 +8,9 @@ pump:
   backend: null          # null | serial   (하드웨어 연결 시 serial)
   serial_port: /dev/ttyUSB0
   limits:
+    min_volume_ul: 1.0
     max_volume_ul: 1000.0
+    min_rate_ul_s: 1.0
     max_rate_ul_s: 200.0
 
 loop:
@@ -20,3 +22,27 @@ ble:
 
 store:
   db_path: ./data/gateway.sqlite
+  data_root: /home/aiworker-1/spacebio-data
+  flush_interval_s: 1.0
+  flush_record_count: 100
+
+# ─── FastAPI Gateway (설계 스펙 6장) ───────────────────────────────────────
+# 위 mqtt/pump.serial_port/loop/ble 섹션은 DEC-012로 동결된 구 게이트웨이
+# (gateway/main.py) 설정이다 — 지우지 않는다. 아래는 신규 gateway/app.py용.
+
+gateway:
+  host: 127.0.0.1
+  port: 8010
+  sensor_publish_hz: 10
+  browser_publish_hz: 5
+  min_free_bytes: 524288000
+
+sensor:
+  datasets_dir: ./datasets
+  adc_full_scale: 4095
+  reference_resistor_ohm: 82500.0
+  default_temperature_c: 25.0
+  default_battery_pct: 100
+
+coordinator:
+  state_root: /home/aiworker-1/clinostat/spacebio-state
