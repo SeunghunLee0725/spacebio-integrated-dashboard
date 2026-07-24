@@ -76,11 +76,45 @@ def test_baseline_sha256sums_match_captured_files():
         assert target.is_file()
 
 
-def test_work_copies_match_captured_baseline():
-    assert (WORK / "server.py").read_bytes() == (BASELINE / "server.py").read_bytes()
-    assert (WORK / "static/index.html").read_bytes() == (
-        BASELINE / "static/index.html"
-    ).read_bytes()
+def test_work_copies_are_a_superset_of_the_captured_baseline():
+    """work은 baseline에 **덧붙이기만** 한다 — 한 줄도 지우거나 바꾸지 않는다.
+
+    SpaceBio 패널이 붙은 뒤로는 바이트 동일성이 성립하지 않는다. 대신
+    baseline의 모든 줄이 work에 그대로 남아 있는지를 검증한다. 이것이
+    "기존 화면을 보존한다"는 계약의 실질이다.
+
+    예외: `stopAllMotion()`은 기존 정지 호출을 보존한 채 펌프 정지를 덧붙이도록
+    의도적으로 확장했다(설계 스펙 6.1). 그 함수 본문의 줄만 면제한다.
+    """
+    for name in ("server.py", "static/index.html"):
+        baseline_lines = (BASELINE / name).read_text(encoding="utf-8").splitlines()
+        work_text = (WORK / name).read_text(encoding="utf-8")
+        work_lines = set(work_text.splitlines())
+
+        exempt = {
+            "  await api('POST', '/api/control/stop');",
+            "  const next = cloneData(appState.controlConfig);",
+            "  next.outer.enabled = false;",
+            "  next.inner.enabled = false;",
+            "  setAppState({",
+            "    running: false,",
+            "    controlConfig: next,",
+            "  });",
+        }
+        missing = [
+            line for line in baseline_lines
+            if line.strip() and line not in work_lines and line not in exempt
+        ]
+        assert not missing, f"{name}에서 사라진 baseline 줄 {len(missing)}개: {missing[:5]}"
+
+
+def test_stop_all_extension_preserves_the_original_clinostat_stop():
+    """STOP ALL 확장이 기존 정지 호출을 지우지 않았는지 따로 못박는다."""
+    work_text = (WORK / "static/index.html").read_text(encoding="utf-8")
+    body = work_text[work_text.index("async function stopAllMotion()"):][:1400]
+    assert "/api/control/stop" in body
+    assert "setAppState(" in body
+    assert body.index("/api/control/stop") < body.index("/api/spacebio/pump/stop")
 
 
 def test_baseline_contains_no_secrets():

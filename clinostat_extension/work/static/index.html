@@ -1272,14 +1272,27 @@ async function stopManualAxis(axisKey) {
 }
 
 async function stopAllMotion() {
-  await api('POST', '/api/control/stop');
-  const next = cloneData(appState.controlConfig);
-  next.outer.enabled = false;
-  next.inner.enabled = false;
-  setAppState({
-    running: false,
-    controlConfig: next,
-  });
+  // 기존 클리노스텟 정지가 항상 먼저다. SpaceBio 펌프 정지는 그 결과와
+  // 무관하게 별도 bounded 요청으로 이어진다 (설계 스펙 6.1).
+  let clinostatOk = true;
+  try {
+    await api('POST', '/api/control/stop');
+    const next = cloneData(appState.controlConfig);
+    next.outer.enabled = false;
+    next.inner.enabled = false;
+    setAppState({ running: false, controlConfig: next });
+  } catch (err) {
+    clinostatOk = false;
+    spacebioLog('클리노스텟 정지 실패: ' + err);
+  }
+  let pumpOk = true;
+  try {
+    await spacebioFetch('/api/spacebio/pump/stop', { method: 'POST', body: {} });
+  } catch (err) {
+    pumpOk = false;
+  }
+  spacebioLog('STOP ALL — 클리노스텟 ' + (clinostatOk ? 'OK' : '실패')
+              + ' / 모의펌프 ' + (pumpOk ? 'OK' : '실패'));
 }
 
 async function refreshStrategies() {
@@ -1700,6 +1713,370 @@ window.addEventListener('load', async () => {
   connectWS();
 });
 window.addEventListener('resize', scheduleCameraResize);
+</script>
+
+<style>
+/* SpaceBio Integration — 기존 스타일에 영향 주지 않도록 전부 #spacebioPanel 하위로 한정 */
+#spacebioPanel { margin-top: 24px; padding: 16px; background: var(--surface);
+  border-radius: var(--radius); border: 1px solid rgba(76,201,240,.25); }
+#spacebioPanel h2 { margin: 0 0 4px; font-size: 18px; color: var(--blue); }
+#spacebioPanel .sb-sub { color: var(--text-dim); font-size: 12px; margin-bottom: 14px; }
+#spacebioPanel .sb-grid { display: grid; gap: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+#spacebioPanel .sb-card { background: var(--card); border-radius: var(--radius); padding: 12px; }
+#spacebioPanel .sb-card h3 { margin: 0 0 10px; font-size: 14px; color: var(--text); }
+#spacebioPanel .sb-row { display: flex; justify-content: space-between; gap: 8px;
+  padding: 3px 0; font-size: 13px; }
+#spacebioPanel .sb-row span:last-child { color: var(--blue); font-variant-numeric: tabular-nums; }
+#spacebioPanel label { display: block; font-size: 12px; color: var(--text-dim); margin: 6px 0 2px; }
+#spacebioPanel input, #spacebioPanel select { width: 100%; box-sizing: border-box; padding: 6px;
+  background: var(--bg); color: var(--text); border: 1px solid rgba(255,255,255,.15);
+  border-radius: 6px; font-size: 13px; }
+#spacebioPanel button { padding: 7px 12px; margin: 8px 6px 0 0; border: 0; cursor: pointer;
+  border-radius: 6px; background: var(--blue); color: #06263a; font-weight: 600; font-size: 13px; }
+#spacebioPanel button.sb-danger { background: var(--accent); color: #fff; }
+#spacebioPanel button:disabled { opacity: .4; cursor: not-allowed; }
+#spacebioPanel .sb-badge { display: inline-block; padding: 2px 8px; border-radius: 999px;
+  font-size: 11px; font-weight: 700; background: var(--orange); color: #2b1a00; }
+#spacebioPanel .sb-latched { color: var(--accent); font-weight: 700; }
+#spacebioPanel.sb-stale { opacity: .65; }
+#spacebioPanel .sb-err { color: var(--accent); font-size: 12px; min-height: 16px; }
+#spacebioPanel #spacebioEvents { max-height: 130px; overflow-y: auto; font-size: 12px;
+  color: var(--text-dim); background: var(--bg); border-radius: 6px; padding: 8px;
+  white-space: pre-wrap; }
+#spacebioPanel canvas { max-width: 100%; }
+</style>
+
+<div id="spacebioPanel">
+  <h2>SpaceBio Integration</h2>
+  <div class="sb-sub">모의 저항센서 · 모의 펌프 · 통합 세션 기록 (실장치 아님)</div>
+
+  <div class="sb-grid">
+    <div class="sb-card">
+      <h3>Gateway</h3>
+      <div class="sb-row"><span>상태</span><span id="spacebioGatewayState">-</span></div>
+      <div class="sb-row"><span>마지막 응답</span><span id="spacebioGatewayLastSeen">-</span></div>
+      <div class="sb-err" id="spacebioGatewayError"></div>
+      <div class="sb-row"><span>세션 ID</span><span id="spacebioSessionId">-</span></div>
+      <div class="sb-row"><span>기록 상태</span><span id="spacebioSessionRecordingState">idle</span></div>
+      <div class="sb-row"><span>시작 시각</span><span id="spacebioSessionStartedAt">-</span></div>
+      <div class="sb-row"><span>경과</span><span id="spacebioSessionElapsed">-</span></div>
+      <label for="spacebioExperimentName">실험명</label>
+      <input id="spacebioExperimentName" type="text" value="simulation-smoke">
+      <button id="spacebioSessionStart">세션 시작</button>
+      <button id="spacebioSessionFinish">세션 종료</button>
+    </div>
+
+    <div class="sb-card">
+      <h3>저항센서 <span class="sb-badge">SIMULATED</span></h3>
+      <label for="resistanceMode">모드</label>
+      <select id="resistanceMode">
+        <option value="CSV_REPLAY">CSV 재생 (실측 데이터)</option>
+        <option value="SYNTHETIC">합성 신호</option>
+      </select>
+      <label for="resistanceDataset">데이터셋</label>
+      <select id="resistanceDataset"></select>
+      <label for="resistanceBaselineOhm">기준 저항 R0 (Ω)</label>
+      <input id="resistanceBaselineOhm" type="number" value="82500" step="100">
+      <label for="resistanceAmplitudeOhm">진폭 (Ω)</label>
+      <input id="resistanceAmplitudeOhm" type="number" value="500" step="10">
+      <label for="resistancePeriodS">주기 (s)</label>
+      <input id="resistancePeriodS" type="number" value="30" step="0.5">
+      <label for="resistanceNoiseStdOhm">잡음 표준편차 (Ω)</label>
+      <input id="resistanceNoiseStdOhm" type="number" value="10" step="1">
+      <label for="resistanceSeed">seed</label>
+      <input id="resistanceSeed" type="number" value="25007" step="1">
+      <button id="resistanceStart">측정 시작</button>
+      <button id="resistanceStop">정지</button>
+      <div class="sb-row"><span>저항</span><span id="resistanceValue">-</span></div>
+      <div class="sb-row"><span>ΔR/R₀</span><span id="resistanceDelta">-</span></div>
+      <div class="sb-row"><span>raw ADC</span><span id="resistanceAdc">-</span></div>
+      <div class="sb-row"><span>온도 (°C)</span><span id="resistanceTemperature">-</span></div>
+      <div class="sb-row"><span>배터리 (%)</span><span id="resistanceBattery">-</span></div>
+    </div>
+
+    <div class="sb-card">
+      <h3>모의 펌프 <span class="sb-badge" id="pumpSimulatedBadge">SIMULATED</span></h3>
+      <div class="sb-row"><span>상태</span><span id="pumpState">idle</span></div>
+      <div class="sb-row"><span>비상정지 래치</span><span id="pumpEstopLatched">해제됨</span></div>
+      <label for="pumpRate">유량 (µL/s, 1–200)</label>
+      <input id="pumpRate" type="number" value="50" step="0.1" min="1" max="200">
+      <label for="pumpTargetVolume">목표량 (µL, 1–1000)</label>
+      <input id="pumpTargetVolume" type="number" value="120" step="0.1" min="1" max="1000">
+      <div class="sb-row"><span>전달량</span><span id="pumpDeliveredVolume">0.0</span></div>
+      <div class="sb-row"><span>세션 누적</span><span id="pumpCumulativeVolume">0.0</span></div>
+      <button id="pumpDispense">주입</button>
+      <button id="pumpStop">정지</button>
+      <button id="pumpEmergencyStop" class="sb-danger">비상 정지</button>
+      <label for="pumpResetAcknowledgement">해제 확인 문구를 정확히 입력</label>
+      <input id="pumpResetAcknowledgement" type="text" placeholder="확인 문구">
+      <button id="pumpResetEmergencyStop" disabled>비상정지 해제</button>
+    </div>
+  </div>
+
+  <div class="sb-card" style="margin-top:14px">
+    <h3>저항 추이</h3>
+    <canvas id="resistanceChart" height="120"></canvas>
+  </div>
+
+  <div class="sb-card" style="margin-top:14px">
+    <h3>이벤트</h3>
+    <div id="spacebioEvents"></div>
+  </div>
+</div>
+
+<script>
+// ====== SpaceBio Integration ======
+// 브라우저는 Gateway에 직접 접속하지 않는다. 항상 :8000의 /api/spacebio/* 를 경유한다.
+const SPACEBIO_ESTOP_ACK = 'RESET_SIMULATED_PUMP_ESTOP';
+const SPACEBIO_BACKOFF = [1000, 2000, 4000, 8000, 10000];
+const SPACEBIO_STALE_MS = 3000;
+const SPACEBIO_MAX_POINTS = 1800;
+const SPACEBIO_RENDER_MS = 200;   // 5 Hz 상한
+
+let spacebioWs = null;
+let spacebioBackoffIndex = 0;
+let spacebioLastSeenAt = 0;
+let spacebioLastSequence = null;
+let spacebioSessionStartedAt = null;
+let spacebioLastRender = 0;
+let spacebioChart = null;
+
+const sbEl = (id) => document.getElementById(id);
+
+function spacebioLog(message) {
+  const box = sbEl('spacebioEvents');
+  if (!box) return;
+  const now = new Date().toLocaleTimeString();
+  box.textContent = '[' + now + '] ' + message + '\n' + box.textContent;
+}
+
+async function spacebioFetch(path, options) {
+  const opts = options || {};
+  const init = { method: opts.method || 'GET', headers: { 'Content-Type': 'application/json' } };
+  if (opts.body !== undefined) init.body = JSON.stringify(opts.body);
+  const res = await fetch(path, init);
+  const payload = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const err = (payload && payload.error) || { code: 'error', message: res.statusText };
+    sbEl('spacebioGatewayError').textContent = err.code + ': ' + err.message;
+    spacebioLog('오류 ' + res.status + ' — ' + err.code);
+    throw new Error(err.code);
+  }
+  sbEl('spacebioGatewayError').textContent = '';
+  return payload.data;
+}
+
+// Gateway가 죽어도 기존 클리노스텟 컨트롤은 그대로 쓸 수 있어야 한다.
+// 여기서는 SpaceBio 패널 안의 컨트롤만 비활성화한다.
+function spacebioSetStale(isStale) {
+  const panel = sbEl('spacebioPanel');
+  if (!panel) return;
+  panel.classList.toggle('sb-stale', isStale);
+  panel.querySelectorAll('button, input, select').forEach((node) => {
+    if (node.id === 'pumpResetEmergencyStop') return;
+    node.disabled = isStale;
+  });
+  if (isStale) {
+    sbEl('spacebioGatewayState').textContent = 'degraded (응답 없음)';
+  }
+  spacebioSyncResetButton();
+}
+
+function spacebioApplySensorMode() {
+  const mode = sbEl('resistanceMode').value;
+  const isCsv = mode === 'CSV_REPLAY';
+  sbEl('resistanceDataset').disabled = !isCsv;
+  ['resistanceBaselineOhm', 'resistanceAmplitudeOhm', 'resistancePeriodS',
+   'resistanceNoiseStdOhm', 'resistanceSeed'].forEach((id) => {
+    sbEl(id).disabled = isCsv;
+  });
+}
+
+function spacebioSyncResetButton() {
+  const typed = sbEl('pumpResetAcknowledgement').value;
+  const button = sbEl('pumpResetEmergencyStop');
+  button.disabled = typed !== SPACEBIO_ESTOP_ACK;
+}
+
+async function spacebioResetEstop() {
+  // 운영자가 실제로 입력한 문자열을 그대로 보낸다. 숨은 상수를 대신 보내면
+  // 확인 절차 자체가 무의미해진다.
+  const field = sbEl('pumpResetAcknowledgement');
+  const typed = field.value;
+  await spacebioFetch('/api/spacebio/pump/reset-emergency-stop',
+                      { method: 'POST', body: { acknowledgement: typed } });
+  field.value = '';
+  spacebioSyncResetButton();
+  spacebioLog('비상정지 해제됨');
+}
+
+async function spacebioConfigureSensor() {
+  const mode = sbEl('resistanceMode').value;
+  const body = { mode };
+  if (mode === 'CSV_REPLAY') {
+    body.dataset_id = sbEl('resistanceDataset').value;
+    body.replay_speed = 1.0;
+    body.loop = true;
+  } else {
+    body.baseline_resistance_ohm = Number(sbEl('resistanceBaselineOhm').value);
+    body.amplitude_ohm = Number(sbEl('resistanceAmplitudeOhm').value);
+    body.period_s = Number(sbEl('resistancePeriodS').value);
+    body.noise_std_ohm = Number(sbEl('resistanceNoiseStdOhm').value);
+    body.seed = Number(sbEl('resistanceSeed').value);
+  }
+  await spacebioFetch('/api/spacebio/sensor/configure', { method: 'POST', body });
+}
+
+function spacebioRenderStatus(status) {
+  if (!status) return;
+  spacebioLastSeenAt = Date.now();
+  sbEl('spacebioGatewayState').textContent = status.gateway.state;
+  sbEl('spacebioGatewayLastSeen').textContent = new Date().toLocaleTimeString();
+
+  const session = status.session || {};
+  sbEl('spacebioSessionId').textContent = session.session_id || '-';
+  sbEl('spacebioSessionRecordingState').textContent = session.state || 'idle';
+  if (session.state === 'recording' && !spacebioSessionStartedAt) {
+    spacebioSessionStartedAt = Date.now();
+    sbEl('spacebioSessionStartedAt').textContent = new Date().toLocaleTimeString();
+  }
+  if (session.state !== 'recording') spacebioSessionStartedAt = null;
+  sbEl('spacebioSessionElapsed').textContent = spacebioSessionStartedAt
+    ? Math.round((Date.now() - spacebioSessionStartedAt) / 1000) + ' s' : '-';
+
+  const pump = status.pump || {};
+  sbEl('pumpState').textContent = pump.state;
+  const latched = sbEl('pumpEstopLatched');
+  latched.textContent = pump.estop_latched ? '래치됨 — 해제 필요' : '해제됨';
+  latched.classList.toggle('sb-latched', !!pump.estop_latched);
+  sbEl('pumpDeliveredVolume').textContent = (pump.delivered_volume_ul || 0).toFixed(1);
+  sbEl('pumpCumulativeVolume').textContent = (pump.session_cumulative_volume_ul || 0).toFixed(1);
+
+  const sensor = status.sensor || {};
+  const sample = sensor.sample;
+  if (sample) {
+    sbEl('resistanceValue').textContent = sample.resistance_ohm.toFixed(2) + ' Ω';
+    sbEl('resistanceDelta').textContent = sample.delta_r_over_r0.toExponential(3);
+    sbEl('resistanceAdc').textContent = sample.raw_adc;
+    sbEl('resistanceTemperature').textContent = sample.temperature_c.toFixed(1);
+    sbEl('resistanceBattery').textContent = sample.battery_pct;
+    spacebioPushPoint(sample);
+  }
+}
+
+function spacebioPushPoint(sample) {
+  if (!spacebioChart) return;
+  const now = Date.now();
+  const data = spacebioChart.data;
+  data.labels.push((sample.session_elapsed_ms / 1000).toFixed(1));
+  data.datasets[0].data.push(sample.resistance_ohm);
+  while (data.labels.length > SPACEBIO_MAX_POINTS) {
+    data.labels.shift();
+    data.datasets[0].data.shift();
+  }
+  if (now - spacebioLastRender < SPACEBIO_RENDER_MS) return;
+  spacebioLastRender = now;
+  spacebioChart.update('none');
+}
+
+function spacebioConnect() {
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  spacebioWs = new WebSocket(proto + '//' + location.host + '/ws/spacebio');
+  spacebioWs.onopen = () => {
+    spacebioBackoffIndex = 0;
+    spacebioSetStale(false);
+    spacebioLog('Gateway 스트림 연결됨');
+  };
+  spacebioWs.onmessage = async (event) => {
+    const message = JSON.parse(event.data);
+    if (message.type !== 'status') return;
+    // sequence가 건너뛰면 중간 상태를 놓친 것이므로 전체 상태를 다시 받는다.
+    if (spacebioLastSequence !== null && message.sequence > spacebioLastSequence + 1) {
+      try {
+        spacebioRenderStatus(await spacebioFetch('/api/spacebio/status'));
+      } catch (err) { /* stale 감시자가 처리한다 */ }
+    }
+    spacebioLastSequence = message.sequence;
+    spacebioRenderStatus(message.data);
+  };
+  spacebioWs.onclose = () => {
+    const delay = SPACEBIO_BACKOFF[Math.min(spacebioBackoffIndex, SPACEBIO_BACKOFF.length - 1)];
+    spacebioBackoffIndex += 1;
+    setTimeout(spacebioConnect, delay);
+  };
+  spacebioWs.onerror = () => { if (spacebioWs) spacebioWs.close(); };
+}
+
+async function spacebioInit() {
+  spacebioChart = new Chart(sbEl('resistanceChart'), {
+    type: 'line',
+    data: { labels: [], datasets: [{ label: '저항 (Ω)', data: [], borderColor: '#4cc9f0',
+      borderWidth: 1.5, pointRadius: 0, tension: .2 }] },
+    options: { animation: false, responsive: true, maintainAspectRatio: false,
+      scales: { x: { title: { display: true, text: '세션 경과 (s)' } },
+                y: { title: { display: true, text: '저항 (Ω)' } } } },
+  });
+
+  sbEl('resistanceMode').addEventListener('change', spacebioApplySensorMode);
+  sbEl('pumpResetAcknowledgement').addEventListener('input', spacebioSyncResetButton);
+  spacebioApplySensorMode();
+  spacebioSyncResetButton();
+
+  sbEl('resistanceStart').onclick = async () => {
+    await spacebioConfigureSensor();
+    await spacebioFetch('/api/spacebio/sensor/start', { method: 'POST', body: {} });
+    spacebioLog('센서 측정 시작');
+  };
+  sbEl('resistanceStop').onclick = async () => {
+    await spacebioFetch('/api/spacebio/sensor/stop', { method: 'POST', body: {} });
+    spacebioLog('센서 정지');
+  };
+  sbEl('pumpDispense').onclick = async () => {
+    await spacebioFetch('/api/spacebio/pump/dispense', { method: 'POST', body: {
+      rate_ul_s: Number(sbEl('pumpRate').value),
+      target_volume_ul: Number(sbEl('pumpTargetVolume').value) } });
+    spacebioLog('주입 시작');
+  };
+  sbEl('pumpStop').onclick = () =>
+    spacebioFetch('/api/spacebio/pump/stop', { method: 'POST', body: {} });
+  sbEl('pumpEmergencyStop').onclick = async () => {
+    await spacebioFetch('/api/spacebio/pump/emergency-stop', { method: 'POST', body: {} });
+    spacebioLog('비상 정지 — 래치됨');
+  };
+  sbEl('pumpResetEmergencyStop').onclick = spacebioResetEstop;
+
+  sbEl('spacebioSessionStart').onclick = async () => {
+    const stamp = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    const sid = 'spacebio_' + stamp.getFullYear() + pad(stamp.getMonth() + 1)
+      + pad(stamp.getDate()) + '_' + pad(stamp.getHours()) + pad(stamp.getMinutes())
+      + pad(stamp.getSeconds()) + '_' + Math.random().toString(36).slice(2, 6);
+    await spacebioFetch('/api/spacebio/session/start', { method: 'POST', body: {
+      session_id: sid, experiment_name: sbEl('spacebioExperimentName').value,
+      started_at: stamp.toISOString() } });
+    spacebioLog('세션 시작: ' + sid);
+  };
+  sbEl('spacebioSessionFinish').onclick = async () => {
+    const current = sbEl('spacebioSessionId').textContent;
+    await spacebioFetch('/api/spacebio/session/finish', { method: 'POST', body: {
+      session_id: current, finished_at: new Date().toISOString(),
+      clinostat_run_id: null } });
+    spacebioLog('세션 종료: ' + current);
+  };
+
+  try {
+    spacebioRenderStatus(await spacebioFetch('/api/spacebio/status'));
+  } catch (err) {
+    spacebioSetStale(true);
+  }
+  spacebioConnect();
+  setInterval(() => {
+    spacebioSetStale(Date.now() - spacebioLastSeenAt > SPACEBIO_STALE_MS);
+  }, 1000);
+}
+
+document.addEventListener('DOMContentLoaded', spacebioInit);
 </script>
 </body>
 </html>
