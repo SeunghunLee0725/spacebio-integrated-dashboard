@@ -20,42 +20,71 @@ integration/
 ├─ config.yaml
 ├─ requirements.txt     # 런타임 직접 의존성
 ├─ requirements-dev.txt # 테스트/개발 의존성
-└─ constraints.txt      # 검증된 전체 의존성 버전
+├─ constraints-macos-arm64-py314-dev.txt # macOS 개발 잠금
+└─ constraints-linux-aarch64-py311.txt   # Pi 배포 잠금
 ```
 
 ## Python 및 의존성
 
-지원 범위는 **Python 3.10 이상, 3.15 미만**이다. 런타임 설치는 직접
-의존성을 `requirements.txt`에서 읽고, 검증된 전체 버전을
-`constraints.txt`로 고정한다.
+소스의 지원 범위는 **Python 3.10 이상, 3.15 미만**이다. 재현 가능한
+설치는 현재 검증된 다음 두 환경으로 제한된다.
+
+- macOS arm64, Python 3.14:
+  `constraints-macos-arm64-py314-dev.txt`
+- Raspberry Pi Linux aarch64, Python 3.11:
+  `constraints-linux-aarch64-py311.txt`
+
+`deploy/setup.sh`는 운영체제, 아키텍처, Python 마이너 버전을 검사해 정확한
+파일만 선택하며, 검증된 조합이 아니면 시스템을 변경하기 전에 종료한다.
+Pi에서는 Linux aarch64 잠금 파일을 사용하며 Bleak의 Linux 의존성
+`dbus-fast`도 고정되어 있다.
+
+FastAPI, Uvicorn, Pydantic, HTTPX는 다음 게이트웨이 API 단계에 필요한
+런타임 기반이므로 유지한다. Bleak도 현재 `gateway.ble_source`가 제공하는
+BLE 센서 경로에 필요한 런타임 의존성이다.
+
+macOS 개발 환경 설치:
 
 ```bash
 python3 -m venv --clear .venv
 .venv/bin/python -m pip install --upgrade pip
-.venv/bin/python -m pip install -r requirements.txt -c constraints.txt
+.venv/bin/python -m pip install -r requirements-dev.txt \
+  -c constraints-macos-arm64-py314-dev.txt
 ```
 
-테스트 환경은 다음과 같이 설치한다.
-
-```bash
-.venv/bin/python -m pip install -r requirements-dev.txt -c constraints.txt
-```
-
-직접 의존성 범위를 변경한 뒤 잠금 파일을 갱신하려면 깨끗한 가상환경에서
-개발 의존성을 설치하고 `pip freeze` 결과를 다시 생성한 후 전체 테스트를
-실행한다. 제약 파일에 포함된 플랫폼 전용 패키지는 해당 플랫폼에서
-의존성으로 선택될 때만 적용되며, 제약 파일 자체가 패키지를 설치하지 않는다.
+macOS 개발 잠금 갱신:
 
 ```bash
 python3 -m venv --clear .venv
 .venv/bin/python -m pip install --upgrade pip
 .venv/bin/python -m pip install -r requirements-dev.txt
-.venv/bin/python -m pip freeze --exclude pip > constraints.txt
+.venv/bin/python -m pip freeze --exclude pip \
+  > constraints-macos-arm64-py314-dev.txt
 .venv/bin/python -m pip check
 .venv/bin/python -m pytest tests -q
 ```
 
-## 빠른 시작 (Linux)
+Pi 잠금은 macOS의 `pip freeze`로 만들지 않는다. 검증된 target-aware
+resolver인 `uv 0.11.7`로 Linux aarch64/Python 3.11을 지정해 갱신한다.
+
+```bash
+UV_CUSTOM_COMPILE_COMMAND='uv pip compile requirements.txt --python-platform aarch64-manylinux_2_17 --python-version 3.11 --only-binary :all: --output-file constraints-linux-aarch64-py311.txt' \
+uv pip compile requirements.txt \
+  --python-platform aarch64-manylinux_2_17 \
+  --python-version 3.11 \
+  --only-binary :all: \
+  --output-file constraints-linux-aarch64-py311.txt
+```
+
+갱신 후 Pi 또는 동등한 Linux aarch64/Python 3.11 환경에서 다음 설치를
+검증한다.
+
+```bash
+python3 -m pip install --dry-run -r requirements.txt \
+  -c constraints-linux-aarch64-py311.txt
+```
+
+## 빠른 시작 (Raspberry Pi Linux aarch64/Python 3.11)
 ```bash
 bash deploy/setup.sh                      # mosquitto + venv + 의존성
 source .venv/bin/activate
