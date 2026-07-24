@@ -28,6 +28,13 @@ from camera import camera
 from experiment import ExperimentRunner
 from optimizer import OptimizerRunner
 
+# SpaceBio 통합 — 기존 클리노스텟 동작에 영향을 주지 않는 가산 확장 (DEC-012)
+import httpx
+from fastapi.responses import JSONResponse
+from fastapi import Request
+import spacebio_proxy
+from spacebio_proxy import ProxyGatewayError, ProxyPathError
+
 # === 하드웨어 인스턴스 ===
 ac_servo = ACServo()
 bldc_motor = BLDCMotor()
@@ -40,13 +47,21 @@ ws_clients: set[WebSocket] = set()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Gateway로 가는 단일 HTTP 클라이언트. 요청마다 새로 만들면 연결 비용이
+    # 제어 응답성에 영향을 준다.
+    app.state.spacebio_client = httpx.AsyncClient(
+        base_url=spacebio_proxy.GATEWAY_BASE_URL
+    )
+    app.state.spacebio = spacebio_proxy.SpaceBioProxy(app.state.spacebio_client)
     yield
     # 종료 시 정리
+    # (하드웨어 정지가 항상 먼저다. SpaceBio 클라이언트는 그 뒤에 닫는다.)
     control.stop()
     ac_servo.disconnect()
     bldc_motor.disconnect()
     sensor.disconnect()
     camera.stop()
+    await app.state.spacebio_client.aclose()
 
 
 app = FastAPI(title="Clinostat Controller", lifespan=lifespan)
@@ -961,6 +976,146 @@ async def websocket_endpoint(ws: WebSocket):
                 data["sensor"] = sensor.get_data()
             await ws.send_json(data)
             await asyncio.sleep(0.1)
+    except (WebSocketDisconnect, Exception):
+        pass
+
+
+# ============================================================
+#  SpaceBio 통합 프록시 (설계 스펙 6.1)
+#  브라우저는 Gateway에 직접 접속하지 않고 항상 여기를 경유한다.
+#  Gateway 장애는 아래 경로에만 갇히고 모터 제어로 전파되지 않는다.
+# ============================================================
+
+def _spacebio_envelope_error(request_id: str, code: str, message: str) -> dict:
+    return {
+        "schema_version": 1,
+        "request_id": request_id,
+        "server_time": datetime.now().astimezone().isoformat(),
+        "error": {"code": code, "message": message},
+    }
+
+
+def _spacebio_request_id(request: Request) -> str:
+    return request.headers.get("X-Request-ID") or spacebio_proxy.new_request_id()
+
+
+async def _spacebio_relay(request: Request, path: str, body: Any = None) -> Any:
+    """Gateway 응답을 그대로 돌려주되, 오류는 status와 code를 보존해 옮긴다."""
+    request_id = _spacebio_request_id(request)
+    proxy = request.app.state.spacebio
+    try:
+        if body is None:
+            return await proxy.get(path, request_id)
+        return await proxy.mutate(path, body, request_id)
+    except ProxyPathError:
+        return JSONResponse(
+            status_code=404,
+            content=_spacebio_envelope_error(request_id, "not_proxied", "unknown route"),
+        )
+    except ProxyGatewayError as exc:
+        return JSONResponse(
+            status_code=exc.status_code,
+            content=_spacebio_envelope_error(
+                request_id, exc.error.get("code", "gateway_error"),
+                exc.error.get("message", ""),
+            ),
+        )
+
+
+@app.get("/api/spacebio/status")
+async def spacebio_status(request: Request):
+    return await _spacebio_relay(request, "/api/spacebio/status")
+
+
+@app.get("/api/spacebio/sensor/status")
+async def spacebio_sensor_status(request: Request):
+    return await _spacebio_relay(request, "/api/spacebio/sensor/status")
+
+
+@app.get("/api/spacebio/pump/status")
+async def spacebio_pump_status(request: Request):
+    return await _spacebio_relay(request, "/api/spacebio/pump/status")
+
+
+@app.get("/api/spacebio/session/status")
+async def spacebio_session_status(request: Request):
+    return await _spacebio_relay(request, "/api/spacebio/session/status")
+
+
+@app.post("/api/spacebio/sensor/configure")
+async def spacebio_sensor_configure(request: Request):
+    return await _spacebio_relay(
+        request, "/api/spacebio/sensor/configure", await request.json()
+    )
+
+
+@app.post("/api/spacebio/sensor/start")
+async def spacebio_sensor_start(request: Request):
+    return await _spacebio_relay(request, "/api/spacebio/sensor/start", {})
+
+
+@app.post("/api/spacebio/sensor/stop")
+async def spacebio_sensor_stop(request: Request):
+    return await _spacebio_relay(request, "/api/spacebio/sensor/stop", {})
+
+
+@app.post("/api/spacebio/pump/dispense")
+async def spacebio_pump_dispense(request: Request):
+    return await _spacebio_relay(
+        request, "/api/spacebio/pump/dispense", await request.json()
+    )
+
+
+@app.post("/api/spacebio/pump/stop")
+async def spacebio_pump_stop(request: Request):
+    return await _spacebio_relay(request, "/api/spacebio/pump/stop", {})
+
+
+@app.post("/api/spacebio/pump/emergency-stop")
+async def spacebio_pump_emergency_stop(request: Request):
+    return await _spacebio_relay(request, "/api/spacebio/pump/emergency-stop", {})
+
+
+@app.post("/api/spacebio/pump/reset-emergency-stop")
+async def spacebio_pump_reset_emergency_stop(request: Request):
+    return await _spacebio_relay(
+        request, "/api/spacebio/pump/reset-emergency-stop", await request.json()
+    )
+
+
+@app.post("/api/spacebio/session/start")
+async def spacebio_session_start(request: Request):
+    return await _spacebio_relay(
+        request, "/api/spacebio/session/start", await request.json()
+    )
+
+
+@app.post("/api/spacebio/session/update")
+async def spacebio_session_update(request: Request):
+    return await _spacebio_relay(
+        request, "/api/spacebio/session/update", await request.json()
+    )
+
+
+@app.post("/api/spacebio/session/finish")
+async def spacebio_session_finish(request: Request):
+    return await _spacebio_relay(
+        request, "/api/spacebio/session/finish", await request.json()
+    )
+
+
+@app.websocket("/ws/spacebio")
+async def spacebio_ws(ws: WebSocket):
+    """Gateway 상태를 브라우저로 중계한다. 기존 /ws 는 건드리지 않는다."""
+    await ws.accept()
+    proxy = ws.app.state.spacebio
+    sequence = 0
+    try:
+        while True:
+            data = await proxy.get("/api/spacebio/status", None)
+            sequence += 1
+            await ws.send_json({"type": "status", "sequence": sequence, "data": data})
+            await asyncio.sleep(0.2)          # 브라우저 중계 5 Hz 상한
     except (WebSocketDisconnect, Exception):
         pass
 
