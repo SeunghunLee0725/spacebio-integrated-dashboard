@@ -4,6 +4,7 @@
   "openapi_source": "http://100.77.1.42:8000/openapi.json",
   "pi_hostname": "clinostat-pi",
   "remote_actions": "read-only",
+  "revision_note": "캡처 시점의 작업트리 내용은 이 커밋과 바이트 단위로 동일하다. 캡처 중 미커밋 변경분이 pre-spacebio-integration 태그로 커밋됐으며, server.py/control_loop.py/static/index.html/clinostat.service 4개 파일 sha256을 파이 실물과 재대조해 일치를 확인했다.",
   "service_active": "clinostat.service (running, unmodified)",
   "sha256": {
     "clinostat.service": "fcc7216095c606fb328b55323c0074a1ae3397da7382805fcc3cde9be6ad4895",
@@ -18,7 +19,8 @@
   },
   "source_host": "aiworker-1@100.77.1.42",
   "source_path": "/home/aiworker-1/clinostat",
-  "source_revision": "ed6e8ad1fe52ec1baaea119f6f78223d53666694",
+  "source_revision": "5e36174dae79d7643e762fce1962352620e81836",
+  "source_tag": "pre-spacebio-integration",
   "websocket_observed_seconds": 20.0,
   "websocket_path": "/ws"
 }
