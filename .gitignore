@@ -1,12 +1,23 @@
-.venv/
-data/
-__pycache__/
-*.pyc
-.pytest_cache/
-.worktrees/
-*.sqlite*
-deploy/baseline/*/
-deploy/releases/
-clinostat_extension/baseline/*/server.log
+/.venv/
+/data/
+**/__pycache__/
+*.py[cod]
+/.pytest_cache/
+/.worktrees/
+
+# Project-local runtime databases only.
+/data/**/*.sqlite*
+/gateway.sqlite*
+
+# Raw deployment captures are local; sanitized contract fixtures are versionable.
+/deploy/baseline/**
+!/deploy/baseline/contracts/
+!/deploy/baseline/contracts/**
+/deploy/releases/
+/clinostat_extension/baseline/*/server.log
+
+.env
 *.env
-.omc/
+!*.env.example
+!/deploy/*.env.example
+/.omc/

@@ -21,7 +21,7 @@ python3 -m venv "$HERE/.venv"
 # shellcheck disable=SC1091
 source "$HERE/.venv/bin/activate"
 pip install --upgrade pip
-pip install -r "$HERE/requirements.txt"
+pip install -r "$HERE/requirements.txt" -c "$HERE/constraints.txt"
 
 echo "==> Mosquitto 로컬 설정 적용"
 sudo cp "$HERE/deploy/mosquitto.conf" /etc/mosquitto/conf.d/spacebio.conf

@@ -18,7 +18,41 @@ integration/
 ├─ deploy/             # mosquitto.conf, setup.sh, systemd 유닛
 ├─ tests/              # 브로커 비의존 단위 테스트
 ├─ config.yaml
-└─ requirements.txt
+├─ requirements.txt     # 런타임 직접 의존성
+├─ requirements-dev.txt # 테스트/개발 의존성
+└─ constraints.txt      # 검증된 전체 의존성 버전
+```
+
+## Python 및 의존성
+
+지원 범위는 **Python 3.10 이상, 3.15 미만**이다. 런타임 설치는 직접
+의존성을 `requirements.txt`에서 읽고, 검증된 전체 버전을
+`constraints.txt`로 고정한다.
+
+```bash
+python3 -m venv --clear .venv
+.venv/bin/python -m pip install --upgrade pip
+.venv/bin/python -m pip install -r requirements.txt -c constraints.txt
+```
+
+테스트 환경은 다음과 같이 설치한다.
+
+```bash
+.venv/bin/python -m pip install -r requirements-dev.txt -c constraints.txt
+```
+
+직접 의존성 범위를 변경한 뒤 잠금 파일을 갱신하려면 깨끗한 가상환경에서
+개발 의존성을 설치하고 `pip freeze` 결과를 다시 생성한 후 전체 테스트를
+실행한다. 제약 파일에 포함된 플랫폼 전용 패키지는 해당 플랫폼에서
+의존성으로 선택될 때만 적용되며, 제약 파일 자체가 패키지를 설치하지 않는다.
+
+```bash
+python3 -m venv --clear .venv
+.venv/bin/python -m pip install --upgrade pip
+.venv/bin/python -m pip install -r requirements-dev.txt
+.venv/bin/python -m pip freeze --exclude pip > constraints.txt
+.venv/bin/python -m pip check
+.venv/bin/python -m pytest tests -q
 ```
 
 ## 빠른 시작 (Linux)
