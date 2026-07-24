@@ -1,10 +1,17 @@
 {
-  "formula": "KP * error + KI * integral",
   "hardware_imported": false,
-  "constructor_strategy": "ast-pure-calculation",
+  "constructor_strategy": "source-verified-pure-function",
+  "formula": "axis_rpm * GEAR_RATIO",
+  "source": {
+    "file": "control_loop.py",
+    "function": "motor_rpm",
+    "line": 5,
+    "sha256": "64924ce97576d367ebb44b0e4d8bbb2b7e5d20615428e75e57deb979ddef63ab"
+  },
   "cases": [
-    {"input": {"error": 0, "integral": 0}, "output": 0.0},
-    {"input": {"error": 1, "integral": 0}, "output": 0.5},
-    {"input": {"error": -2, "integral": 0.5}, "output": -0.975}
+    {"input": {"axis_rpm": 0.0}, "output": 0.0},
+    {"input": {"axis_rpm": 1.0}, "output": 100.0},
+    {"input": {"axis_rpm": -1.0}, "output": -100.0},
+    {"input": {"axis_rpm": 2.5}, "output": 250.0}
   ]
 }

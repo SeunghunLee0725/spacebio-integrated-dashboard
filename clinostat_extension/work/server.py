@@ -1,9 +1,15 @@
-"""Non-operational fixture preserving the captured application contract shape."""
+"""Non-operational fixture matching the known Pi route structure."""
 
-TARGET_RPM = 10.0
-KP = 0.5
-KI = 0.05
+from fastapi import FastAPI, WebSocket
+
+app = FastAPI()
 
 
-def control_output(error: float, integral: float) -> float:
-    return KP * error + KI * integral
+@app.get("/api/control/status")
+async def control_status():
+    return {"running": False, "loop_timing_ms": None}
+
+
+@app.websocket("/ws/control")
+async def control_stream(websocket: WebSocket):
+    return None

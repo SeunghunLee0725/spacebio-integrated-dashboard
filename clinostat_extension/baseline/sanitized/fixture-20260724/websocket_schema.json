@@ -1,4 +1,5 @@
 {
+  "path": "/ws/control",
   "sample_window_seconds": 60,
   "hardware_started": false,
   "message_count": 3,

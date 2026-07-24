@@ -1,10 +1,15 @@
 {
   "extraction": "python-ast-explicit-allowlist",
-  "required": ["KI", "KP", "TARGET_RPM"],
-  "constants": {"KI": 0.05, "KP": 0.5, "TARGET_RPM": 10.0},
-  "name_mapping": {
-    "KI": {"source_name": "KI", "justification": "exact fixture source name"},
-    "KP": {"source_name": "KP", "justification": "exact fixture source name"},
-    "TARGET_RPM": {"source_name": "TARGET_RPM", "justification": "exact fixture source name"}
+  "constants": {
+    "CONTROL_LOOP_INTERVAL_S": 0.1,
+    "ENCODER_PULSES_PER_REV": 12,
+    "GEAR_RATIO": 100.0,
+    "MAX_MOTOR_RPM": 120.0
+  },
+  "mapping": {
+    "CONTROL_LOOP_INTERVAL_S": {"line": 3, "source_file": "control_loop.py", "source_name": "CONTROL_LOOP_INTERVAL_S"},
+    "ENCODER_PULSES_PER_REV": {"line": 2, "source_file": "control_loop.py", "source_name": "ENCODER_PULSES_PER_REV"},
+    "GEAR_RATIO": {"line": 1, "source_file": "control_loop.py", "source_name": "GEAR_RATIO"},
+    "MAX_MOTOR_RPM": {"line": 4, "source_file": "control_loop.py", "source_name": "MAX_MOTOR_RPM"}
   }
 }
