@@ -84,12 +84,9 @@ elif source.endswith("control_loop.py"):
     path.write_text("GEAR_RATIO=100.0\\nENCODER_PULSES_PER_REV=12\\nCONTROL_LOOP_INTERVAL_S=.1\\nMAX_MOTOR_RPM=120.0\\ndef motor_rpm(axis_rpm):\\n return axis_rpm * GEAR_RATIO\\n")
 else: path.write_text("[Service]\\n")
 """)
-    _executable(tools / "websocat", """#!/usr/bin/env python3
-print('{"running":false}')
-print('{"running":false}')
-print('{"running":false}', flush=True)
-import time
-time.sleep(3)
+    _executable(tools / "websocat", """#!/bin/sh
+printf '%s\\n' '{"running":false}' '{"running":false}' '{"running":false}'
+sleep 3
 """)
     _executable(tools / "gitleaks", """#!/usr/bin/env python3
 import pathlib, sys
