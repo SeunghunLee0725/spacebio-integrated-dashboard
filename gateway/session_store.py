@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Callable, IO, Optional
 
 from gateway.api_models import (
+    PumpEvent,
     PUMP_MODE,
     SCHEMA_VERSION,
     PumpState,
@@ -70,18 +71,6 @@ class SessionIoError(OSError):
 
 def _default_free_space_bytes(path: Path) -> int:
     return shutil.disk_usage(path).free
-
-
-@dataclass(frozen=True)
-class PumpEvent:
-    """append_pump_event가 저장하는 상태 전이 1건."""
-
-    ts_ms: int
-    previous_state: str
-    new_state: str
-    cause: str
-    request_id: str
-    delivered_volume_ul: float
 
 
 @dataclass(frozen=True)
@@ -208,9 +197,10 @@ class SessionStore:
         payload = {
             "schema_version": SCHEMA_VERSION,
             "session_id": self._active.session_id,
+            "at": event.at.isoformat(),
             "ts_ms": event.ts_ms,
-            "previous_state": event.previous_state,
-            "new_state": event.new_state,
+            "previous_state": event.previous_state.value,
+            "new_state": event.new_state.value,
             "cause": event.cause,
             "request_id": event.request_id,
             "delivered_volume_ul": event.delivered_volume_ul,

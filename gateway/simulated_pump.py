@@ -20,6 +20,7 @@ from typing import Callable, Optional, Protocol
 from gateway.api_models import (
     PumpDispenseRequest,
     PumpEmergencyStopRequest,
+    PumpEvent,
     PumpResetEmergencyStopRequest,
     PumpState,
     PumpStatus,
@@ -49,18 +50,6 @@ class PumpFaultError(Exception):
     def __init__(self, message: str, *, cause: BaseException) -> None:
         super().__init__(message)
         self.__cause__ = cause
-
-
-@dataclass(frozen=True)
-class PumpEvent:
-    """모든 상태 전이에 대해 만들어지는 이벤트. 실제 파일 기록은 session_store가 담당."""
-
-    previous_state: PumpState
-    new_state: PumpState
-    cause: str
-    request_id: str
-    delivered_volume_ul: float
-    at: str
 
 
 @dataclass(frozen=True)

@@ -57,9 +57,14 @@ def _sample(elapsed=1000, loop_count=0):
     )
 
 
+#: PumpEvent는 api_models가 유일한 정의다 — simulated_pump가 만들고
+#: session_store가 기록하므로 양쪽이 같은 것을 봐야 한다.
+_EVENT_AT = datetime(2026, 7, 24, 10, 0, 0, tzinfo=timezone(timedelta(hours=9)))
+
+
 def _pump_event(new_state="running", delivered=10.0, prev="idle", request_id="pr1", cause="dispense"):
     return PumpEvent(
-        ts_ms=1784854800000, previous_state=prev, new_state=new_state,
+        at=_EVENT_AT, previous_state=prev, new_state=new_state,
         cause=cause, request_id=request_id, delivered_volume_ul=delivered,
     )
 

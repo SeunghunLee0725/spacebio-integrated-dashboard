@@ -252,6 +252,27 @@ class SensorSample(_Status):
     battery_pct: BatteryPct
 
 
+class PumpEvent(_Status):
+    """펌프 상태 전이 1건 — `pump_events.jsonl`의 행 계약 (스펙 6.5).
+
+    `simulated_pump`가 만들고 `session_store`가 기록한다. 두 모듈이 각자
+    정의하면 필드가 어긋나므로(2026-07-24 실제로 `at` vs `ts_ms`로 갈렸다)
+    **여기가 유일한 정의다.** 양쪽 모두 이것을 import해서 쓴다.
+    """
+
+    previous_state: PumpState
+    new_state: PumpState
+    cause: str
+    request_id: str
+    delivered_volume_ul: float
+    at: AwareDatetime
+
+    @property
+    def ts_ms(self) -> int:
+        """epoch 밀리초. JSONL에는 `at`(RFC 3339)과 함께 기록해 정렬을 쉽게 한다."""
+        return int(self.at.timestamp() * 1000)
+
+
 class GatewayComponent(_Status):
     state: GatewayState = GatewayState.ONLINE
     last_seen_at: Optional[AwareDatetime] = None
