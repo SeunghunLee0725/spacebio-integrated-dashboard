@@ -86,6 +86,8 @@ NEW_IDS = [
     "pumpRate", "pumpTargetVolume", "pumpDeliveredVolume",
     "pumpCumulativeVolume", "pumpDispense", "pumpStop",
     "pumpEmergencyStop", "pumpResetAcknowledgement", "pumpResetEmergencyStop",
+    "pumpStepCount", "pumpStepSpm", "pumpSendSteps", "pumpPositionSteps",
+    "spacebioJumpLink",
 ]
 
 
@@ -198,3 +200,64 @@ def test_stop_all_keeps_the_existing_clinostat_stop_first(work):
 def test_stop_all_reports_both_results_independently(work):
     section = work[work.index("async function stopAllMotion()"):][:1600]
     assert "spacebioEvents" in section or "spacebioLog" in section
+
+
+# ─────────────────────────── 데이터셋 드롭다운 (실기 결함 수정) ───────────────────────────
+
+def test_dataset_dropdown_is_populated_at_init(work):
+    """resistanceDataset이 빈 <select>로 남지 않도록 초기화 시점에 채워야 한다."""
+    assert "async function spacebioLoadDatasets" in work
+    assert "/api/spacebio/sensor/datasets" in work
+    init_section = work[work.index("async function spacebioInit"):][:2000]
+    assert "spacebioLoadDatasets()" in init_section
+
+
+def test_dataset_dropdown_load_failure_does_not_crash_the_panel(work):
+    section = work[work.index("async function spacebioLoadDatasets"):][:700]
+    assert "try" in section and "catch" in section
+
+
+def test_dataset_dropdown_uses_sample_count_in_label(work):
+    section = work[work.index("async function spacebioLoadDatasets"):][:700]
+    assert "dataset_id" in section
+    assert "sample_count" in section
+
+
+# ─────────────────────────── 실기 센서(SERIAL_LIVE) 모드 ───────────────────────────
+
+def test_serial_live_mode_option_exists(work):
+    assert 'value="SERIAL_LIVE"' in work
+
+
+def test_serial_live_mode_disables_dataset_and_synthetic_inputs(work):
+    section = work[work.index("function spacebioApplySensorMode"):][:900]
+    assert "SERIAL_LIVE" in section
+    assert "resistanceDataset" in section
+    assert "resistanceBaselineOhm" in section
+
+
+def test_serial_live_configure_sends_mode_only(work):
+    section = work[work.index("async function spacebioConfigureSensor"):][:900]
+    assert "SYNTHETIC" in section, "합성 모드 분기가 명시적이어야 SERIAL_LIVE가 새지 않는다"
+
+
+# ─────────────────────────── 펌프 스텝 컨트롤 ───────────────────────────
+
+def test_pump_step_controls_send_steps_and_spm(work):
+    assert "/api/spacebio/pump/step" in work
+    assert "pumpStepCount" in work and "pumpStepSpm" in work
+    section = work[work.index("sbEl('pumpSendSteps')"):][:400]
+    assert "steps" in section and "spm" in section
+
+
+def test_pump_micro_controls_preserved(work):
+    """기존 µL 컨트롤이 스텝 컨트롤 추가로 지워지지 않았는지 확인한다."""
+    assert "pumpRate" in work and "pumpTargetVolume" in work and "pumpDispense" in work
+
+
+# ─────────────────────────── 상단 이동 링크 ───────────────────────────
+
+def test_jump_link_points_to_the_panel(work):
+    header_section = work[work.index("<header>"):work.index("</header>")]
+    assert 'href="#spacebioPanel"' in header_section
+    assert 'id="spacebioJumpLink"' in header_section

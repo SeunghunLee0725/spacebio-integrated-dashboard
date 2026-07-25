@@ -1037,6 +1037,11 @@ async def spacebio_pump_status(request: Request):
     return await _spacebio_relay(request, "/api/spacebio/pump/status")
 
 
+@app.get("/api/spacebio/sensor/datasets")
+async def spacebio_sensor_datasets(request: Request):
+    return await _spacebio_relay(request, "/api/spacebio/sensor/datasets")
+
+
 @app.get("/api/spacebio/session/status")
 async def spacebio_session_status(request: Request):
     return await _spacebio_relay(request, "/api/spacebio/session/status")
@@ -1069,6 +1074,13 @@ async def spacebio_pump_dispense(request: Request):
 @app.post("/api/spacebio/pump/stop")
 async def spacebio_pump_stop(request: Request):
     return await _spacebio_relay(request, "/api/spacebio/pump/stop", {})
+
+
+@app.post("/api/spacebio/pump/step")
+async def spacebio_pump_step(request: Request):
+    return await _spacebio_relay(
+        request, "/api/spacebio/pump/step", await request.json()
+    )
 
 
 @app.post("/api/spacebio/pump/emergency-stop")
