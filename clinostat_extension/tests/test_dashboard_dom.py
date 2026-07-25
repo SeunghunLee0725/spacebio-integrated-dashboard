@@ -87,8 +87,26 @@ NEW_IDS = [
     "pumpCumulativeVolume", "pumpDispense", "pumpStop",
     "pumpEmergencyStop", "pumpResetAcknowledgement", "pumpResetEmergencyStop",
     "pumpStepCount", "pumpStepSpm", "pumpSendSteps", "pumpPositionSteps",
-    "spacebioJumpLink",
+    "spacebioJumpLink", "resistanceModeBadge", "spacebioSubtitle",
 ]
+
+
+def test_badges_reflect_actual_mode_not_hardcoded_simulated(work):
+    """배지는 status의 실제 mode로 채워야 한다 — SIMULATED 하드코딩 금지."""
+    # 배지 요소에 정적 'SIMULATED' 텍스트가 남아 있으면 안 된다
+    assert 'id="pumpSimulatedBadge">SIMULATED<' not in work
+    assert 'id="resistanceModeBadge">-<' in work or 'id="resistanceModeBadge">' in work
+    # 렌더가 mode로 배지를 채운다
+    render = work[work.index("function spacebioRenderStatus"):]
+    render = render[:render.index("\nfunction ", 1)]
+    assert "pumpSimulatedBadge" in render and "WIRELESS" in render
+    assert "resistanceModeBadge" in render and "SERIAL_LIVE" in render
+
+
+def test_null_raw_adc_shows_dash_not_null(work):
+    """실기 센서의 null raw_adc를 'null'이나 0으로 보여주면 안 된다."""
+    render = work[work.index("resistanceAdc"):]
+    assert "'—'" in render or '"—"' in render
 
 
 @pytest.mark.parametrize("element_id", NEW_IDS)

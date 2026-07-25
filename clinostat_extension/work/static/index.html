@@ -1739,6 +1739,8 @@ window.addEventListener('resize', scheduleCameraResize);
 #spacebioPanel button:disabled { opacity: .4; cursor: not-allowed; }
 #spacebioPanel .sb-badge { display: inline-block; padding: 2px 8px; border-radius: 999px;
   font-size: 11px; font-weight: 700; background: var(--orange); color: #2b1a00; }
+/* 실측(라이브) 모드는 초록 배지로 모의와 시각 구분한다. */
+#spacebioPanel .sb-badge.sb-live { background: var(--green); color: #06280f; }
 #spacebioPanel .sb-latched { color: var(--accent); font-weight: 700; }
 #spacebioPanel.sb-stale { opacity: .65; }
 #spacebioPanel .sb-err { color: var(--accent); font-size: 12px; min-height: 16px; }
@@ -1750,7 +1752,7 @@ window.addEventListener('resize', scheduleCameraResize);
 
 <div id="spacebioPanel">
   <h2>SpaceBio Integration</h2>
-  <div class="sb-sub">모의 저항센서 · 모의 펌프 · 통합 세션 기록 (실장치 아님)</div>
+  <div class="sb-sub" id="spacebioSubtitle">저항센서 · 펌프 · 통합 세션 기록</div>
 
   <div class="sb-grid">
     <div class="sb-card">
@@ -1769,7 +1771,7 @@ window.addEventListener('resize', scheduleCameraResize);
     </div>
 
     <div class="sb-card">
-      <h3>저항센서 <span class="sb-badge">SIMULATED</span></h3>
+      <h3>저항센서 <span class="sb-badge" id="resistanceModeBadge">-</span></h3>
       <label for="resistanceMode">모드</label>
       <select id="resistanceMode">
         <option value="CSV_REPLAY">CSV 재생 (실측 데이터)</option>
@@ -1798,7 +1800,7 @@ window.addEventListener('resize', scheduleCameraResize);
     </div>
 
     <div class="sb-card">
-      <h3>모의 펌프 <span class="sb-badge" id="pumpSimulatedBadge">SIMULATED</span></h3>
+      <h3>펌프 <span class="sb-badge" id="pumpSimulatedBadge">-</span></h3>
       <div class="sb-row"><span>상태</span><span id="pumpState">idle</span></div>
       <div class="sb-row"><span>비상정지 래치</span><span id="pumpEstopLatched">해제됨</span></div>
       <label for="pumpRate">유량 (µL/s, 1–200)</label>
@@ -1976,6 +1978,12 @@ function spacebioRenderStatus(status) {
 
   const pump = status.pump || {};
   sbEl('pumpState').textContent = pump.state;
+  // 배지는 실제 백엔드 모드를 반영한다 (하드코딩된 SIMULATED가 아니라).
+  const pumpBadge = sbEl('pumpSimulatedBadge');
+  if (pump.mode) {
+    pumpBadge.textContent = pump.mode === 'WIRELESS' ? '무선 실측' : '모의';
+    pumpBadge.classList.toggle('sb-live', pump.mode === 'WIRELESS');
+  }
   const latched = sbEl('pumpEstopLatched');
   latched.textContent = pump.estop_latched ? '래치됨 — 해제 필요' : '해제됨';
   latched.classList.toggle('sb-latched', !!pump.estop_latched);
@@ -1986,11 +1994,20 @@ function spacebioRenderStatus(status) {
   }
 
   const sensor = status.sensor || {};
+  // 센서 배지도 실제 모드를 반영한다.
+  const sensorBadge = sbEl('resistanceModeBadge');
+  if (sensor.mode) {
+    const label = {SERIAL_LIVE: '실측 BLE직결', CSV_REPLAY: 'CSV 재생', SYNTHETIC: '합성'};
+    sensorBadge.textContent = label[sensor.mode] || sensor.mode;
+    sensorBadge.classList.toggle('sb-live', sensor.mode === 'SERIAL_LIVE');
+  }
   const sample = sensor.sample;
   if (sample) {
     sbEl('resistanceValue').textContent = sample.resistance_ohm.toFixed(2) + ' Ω';
     sbEl('resistanceDelta').textContent = sample.delta_r_over_r0.toExponential(3);
-    sbEl('resistanceAdc').textContent = sample.raw_adc;
+    // 실기 센서는 raw ADC를 내지 않는다 — null이면 '—'로 표시(0으로 오해 금지).
+    sbEl('resistanceAdc').textContent =
+      sample.raw_adc === null || sample.raw_adc === undefined ? '—' : sample.raw_adc;
     sbEl('resistanceTemperature').textContent = sample.temperature_c.toFixed(1);
     sbEl('resistanceBattery').textContent = sample.battery_pct;
     spacebioPushPoint(sample);
