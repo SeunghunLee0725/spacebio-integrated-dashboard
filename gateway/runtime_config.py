@@ -34,6 +34,14 @@ class GatewayConfig:
     pump_max_volume_ul: float = 1000.0
     pump_min_rate_ul_s: float = 1.0
     pump_max_rate_ul_s: float = 200.0
+    #: 실기 무선 펌프(pump_backend=="wireless")용 MQTT 브로커.
+    mqtt_host: str = "127.0.0.1"
+    mqtt_port: int = 1883
+    mqtt_username: Optional[str] = None
+    mqtt_password: Optional[str] = None
+    #: 실기 저항센서(SERIAL_LIVE)용 시리얼 포트.
+    sensor_serial_port: str = "/dev/ttyACM0"
+    sensor_serial_baudrate: int = 115200
     data_root: Path = Path("/home/aiworker-1/spacebio-data")
     flush_interval_s: float = 1.0
     flush_record_count: int = 100
@@ -47,6 +55,7 @@ def load_config(path: Path) -> GatewayConfig:
     sensor = raw.get("sensor") or {}
     pump = raw.get("pump") or {}
     limits = pump.get("limits") or {}
+    mqtt = raw.get("mqtt") or {}
     store = raw.get("store") or {}
     coordinator = raw.get("coordinator") or {}
 
@@ -70,6 +79,12 @@ def load_config(path: Path) -> GatewayConfig:
         pump_max_volume_ul=float(limits.get("max_volume_ul", 1000.0)),
         pump_min_rate_ul_s=float(limits.get("min_rate_ul_s", 1.0)),
         pump_max_rate_ul_s=float(limits.get("max_rate_ul_s", 200.0)),
+        mqtt_host=str(mqtt.get("host", "127.0.0.1")),
+        mqtt_port=int(mqtt.get("port", 1883)),
+        mqtt_username=mqtt.get("username"),
+        mqtt_password=mqtt.get("password"),
+        sensor_serial_port=str(sensor.get("serial_port", "/dev/ttyACM0")),
+        sensor_serial_baudrate=int(sensor.get("serial_baudrate", 115200)),
         data_root=Path(store.get("data_root", "/home/aiworker-1/spacebio-data")),
         flush_interval_s=float(store.get("flush_interval_s", 1.0)),
         flush_record_count=int(store.get("flush_record_count", 100)),

@@ -170,8 +170,18 @@ class SensorConfigureSyntheticRequest(_Request):
         return self
 
 
+class SensorConfigureSerialLiveRequest(_Request):
+    """실기 센서 설정 — 파라미터가 없다. 보드 스트림을 그대로 받는다."""
+
+    mode: Literal[SensorMode.SERIAL_LIVE] = SensorMode.SERIAL_LIVE
+
+
 SensorConfigureRequest = Annotated[
-    Union[SensorConfigureCsvRequest, SensorConfigureSyntheticRequest],
+    Union[
+        SensorConfigureCsvRequest,
+        SensorConfigureSyntheticRequest,
+        SensorConfigureSerialLiveRequest,
+    ],
     Field(discriminator="mode"),
 ]
 

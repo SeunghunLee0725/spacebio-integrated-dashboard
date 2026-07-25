@@ -34,6 +34,7 @@ from gateway.session_store import (
     SessionIoError,
     SessionNotActiveError,
 )
+from gateway.mqtt_pump import PumpConflictError as MqttPumpConflictError
 from gateway.simulated_pump import PumpConflictError, PumpFaultError
 
 logger = logging.getLogger("gateway.app")
@@ -98,6 +99,7 @@ def _register_exception_handlers(app: FastAPI) -> None:
     app.add_exception_handler(SensorSourceError, _handle_validation_error)
 
     app.add_exception_handler(PumpConflictError, _handle_conflict)
+    app.add_exception_handler(MqttPumpConflictError, _handle_conflict)
     app.add_exception_handler(SensorConflictError, _handle_conflict)
     app.add_exception_handler(SessionConflictError, _handle_conflict)
     app.add_exception_handler(SessionNotActiveError, _handle_conflict)

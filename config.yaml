@@ -43,6 +43,21 @@ sensor:
   reference_resistor_ohm: 82500.0
   default_temperature_c: 25.0
   default_battery_pct: 100
+  # 실기 저항센서(SERIAL_LIVE) — Nano 33 BLE USB 직결
+  serial_port: /dev/ttyACM0
+  serial_baudrate: 115200
+
+# ─── 실기 무선 펌프 (선택) ─────────────────────────────────────────────────
+# 기본은 모의 펌프다. 실기 무선 펌프를 쓰려면 pump.backend를 "wireless"로 두고
+# 아래 mqtt.username/password를 채운 config를 파이에만 배치한다(커밋 금지 — 자격증명).
+#   pump:
+#     backend: wireless
+#   mqtt:
+#     host: 127.0.0.1
+#     port: 1883
+#     username: s25007board
+#     password: <파이 로컬 config에만>
+# gateway/app.py는 위 gateway.mqtt 대신 최상위 mqtt.username/password를 읽는다.
 
 coordinator:
   state_root: /home/aiworker-1/clinostat/spacebio-state

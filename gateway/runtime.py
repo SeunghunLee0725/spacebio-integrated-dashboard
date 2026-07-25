@@ -32,7 +32,9 @@ from gateway.api_models import (
     PumpState,
     PumpStatus,
     PumpStopRequest,
+    PumpStepRequest,
     SensorConfigureCsvRequest,
+    SensorConfigureSerialLiveRequest,
     SensorConfigureSyntheticRequest,
     SensorMode,
     SensorSample,
@@ -45,7 +47,7 @@ from gateway.api_models import (
     SessionUpdateRequest,
     server_time,
 )
-from gateway.csv_replay import load_csv_replay_source
+from gateway.csv_replay import load_csv_replay_source, load_manifest
 from gateway.idempotency import IdempotencyCache
 from gateway.recovery import RecoveryResult, recover_session
 from gateway.session_store import (
@@ -57,6 +59,9 @@ from gateway.session_store import (
     SessionStore,
 )
 from gateway.runtime_config import GatewayConfig, load_config
+from gateway.mqtt_pump import MqttPump
+from gateway.mqtt_pump import PumpConflictError as MqttPumpConflictError
+from gateway.serial_sensor import SerialSensorSource
 from gateway.simulated_pump import FileEstopLatchPersistence, SimulatedPump
 from gateway.synthetic_sensor import SyntheticSensorSource
 
@@ -68,7 +73,11 @@ MAX_PUBLISH_HZ = 10.0
 
 _ESTOP_LATCH_FILENAME = "estop_latch.json"
 
-SensorConfigCommand = Union[SensorConfigureCsvRequest, SensorConfigureSyntheticRequest]
+SensorConfigCommand = Union[
+    SensorConfigureCsvRequest,
+    SensorConfigureSyntheticRequest,
+    SensorConfigureSerialLiveRequest,
+]
 PumpCommand = Union[
     PumpDispenseRequest, PumpStopRequest, PumpEmergencyStopRequest,
     PumpResetEmergencyStopRequest,
@@ -114,16 +123,26 @@ class GatewayRuntime:
         self._current_session_status = SessionStatus()
         self.recovery: Optional[RecoveryResult] = None
 
+        # pump.backend == "wireless"면 실기 무선 펌프(MQTT), 아니면 모의 펌프.
+        # 실기 펌프는 하드웨어 estop이 없어 게이트웨이 측 소프트웨어 래치를 쓴다.
         estop_path = self._config.state_root / _ESTOP_LATCH_FILENAME
-        self._pump = SimulatedPump(
-            event_sink=self._dispatch_pump_event,
-            estop_persistence=FileEstopLatchPersistence(estop_path),
-        )
+        if self._config.pump_backend == "wireless":
+            self._pump: Any = MqttPump(
+                host=self._config.mqtt_host, port=self._config.mqtt_port,
+                username=self._config.mqtt_username, password=self._config.mqtt_password,
+            )
+        else:
+            self._pump = SimulatedPump(
+                event_sink=self._dispatch_pump_event,
+                estop_persistence=FileEstopLatchPersistence(estop_path),
+            )
 
     # ─────────────────────────── 라이프사이클 ───────────────────────────
 
     async def startup(self) -> None:
         """`recover_session()`으로 메타데이터만 복원한다 — 실행은 재개하지 않는다."""
+        if isinstance(self._pump, MqttPump):
+            self._pump.connect()          # 브로커 부재해도 예외를 삼킨다
         sessions_root = self._config.data_root / "sessions"
         latest = _find_latest_session_dir(sessions_root)
         if latest is None:
@@ -149,6 +168,8 @@ class GatewayRuntime:
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await task
+        if isinstance(self._pump, MqttPump):
+            self._pump.disconnect()
 
     def uptime_s(self) -> float:
         return time.monotonic() - self._started_monotonic
@@ -209,6 +230,18 @@ class GatewayRuntime:
             state=self._sensor_state, mode=self._sensor_mode, sample=self._sensor_sample,
         )
 
+    def list_datasets(self) -> list[dict[str, Any]]:
+        """CSV 재생용 dataset 목록. 경로·파일명은 노출하지 않는다(화면 드롭다운용)."""
+        manifest_path = self._config.datasets_dir / "manifest.json"
+        if not manifest_path.exists():
+            return []
+        entries = load_manifest(manifest_path)
+        return [
+            {"dataset_id": e.dataset_id, "sample_count": e.sample_count,
+             "provenance": e.provenance}
+            for e in entries.values()
+        ]
+
     async def configure_sensor(self, request: SensorConfigCommand) -> SensorStatus:
         async with self._lock:
             if self._sensor_state == SensorState.RUNNING:
@@ -224,6 +257,12 @@ class GatewayRuntime:
                     loop=request.loop,
                 )
                 mode = SensorMode.CSV_REPLAY
+            elif isinstance(request, SensorConfigureSerialLiveRequest):
+                source = SerialSensorSource(
+                    port=self._config.sensor_serial_port,
+                    baudrate=self._config.sensor_serial_baudrate,
+                )
+                mode = SensorMode.SERIAL_LIVE
             else:
                 source = SyntheticSensorSource(
                     baseline_resistance_ohm=request.baseline_resistance_ohm,
@@ -311,6 +350,19 @@ class GatewayRuntime:
             if isinstance(command, PumpResetEmergencyStopRequest):
                 return await self._reset_emergency_stop_locked(command)
             raise TypeError(f"unsupported pump command: {type(command)!r}")
+
+    async def pump_step(self, request: PumpStepRequest) -> PumpStatus:
+        """실기 무선 펌프의 스텝 명령. 모의 펌프에는 스텝 개념이 없어 409."""
+        async with self._lock:
+            step = getattr(self._pump, "step", None)
+            if step is None:
+                raise SensorConflictError(
+                    "step commands require the wireless pump backend"
+                )
+            try:
+                return await step(request)
+            except MqttPumpConflictError as exc:
+                raise SensorConflictError(str(exc)) from exc
 
     async def _reset_emergency_stop_locked(
         self, command: PumpResetEmergencyStopRequest,

@@ -465,6 +465,8 @@ def test_config_yaml_never_binds_0000_and_gateway_section_is_fixed():
         "datasets_dir": "./datasets", "adc_full_scale": 4095,
         "reference_resistor_ohm": 82500.0, "default_temperature_c": 25.0,
         "default_battery_pct": 100,
+        # 실기 저항센서(SERIAL_LIVE)용 — 비밀값 아님
+        "serial_port": "/dev/ttyACM0", "serial_baudrate": 115200,
     }
     assert raw["coordinator"] == {"state_root": "/home/aiworker-1/clinostat/spacebio-state"}
     # DEC-012로 동결된 구 섹션들은 지워지지 않았다.

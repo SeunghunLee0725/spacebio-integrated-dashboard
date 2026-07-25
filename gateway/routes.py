@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, Request
 
 from gateway.api_models import (
     PumpDispenseRequest,
+    PumpStepRequest,
     PumpEmergencyStopRequest,
     PumpResetEmergencyStopRequest,
     PumpStopRequest,
@@ -101,6 +102,12 @@ async def stop_sensor(
     return envelope(request, status)
 
 
+@router.get("/api/sensor/datasets")
+async def list_datasets(request: Request, runtime: GatewayRuntime = Depends(get_runtime)):
+    """CSV 재생 dataset 목록 — 화면 드롭다운이 이걸로 채워진다."""
+    return envelope(request, {"datasets": runtime.list_datasets()})
+
+
 # ─────────────────────────── 펌프 ───────────────────────────
 
 @router.post("/api/pump/dispense")
@@ -109,6 +116,15 @@ async def pump_dispense(
     runtime: GatewayRuntime = Depends(get_runtime),
 ):
     return envelope(request, await runtime.pump_command(body))
+
+
+@router.post("/api/pump/step")
+async def pump_step(
+    request: Request, body: PumpStepRequest,
+    runtime: GatewayRuntime = Depends(get_runtime),
+):
+    """실기 무선 펌프의 스텝 명령. 모의 백엔드면 409."""
+    return envelope(request, await runtime.pump_step(body))
 
 
 @router.post("/api/pump/stop")

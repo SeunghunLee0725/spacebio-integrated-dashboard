@@ -128,21 +128,21 @@ class SerialSensorSource:
         if self._serial is None or self._started_at is None:
             return None
 
-        sample = None
-        while True:                       # 밀린 줄이 있으면 가장 최근 것을 쓴다
+        # 호출당 샘플 하나만 낸다(FIFO). 최신까지 비워버리면 세션 로그에서
+        # 중간 샘플이 유실된다 — 0.2 Hz 센서라 밀림은 드물지만 정확성을 지킨다.
+        while True:
             raw = self._serial.readline()
             if not raw:
-                break
+                return None
             line = raw.decode("utf-8", errors="replace")
             try:
                 parsed = parse_data_line(line)
             except SensorSourceError as exc:
                 logger.warning("dropping malformed sensor line: %s", exc)
                 continue
-            if parsed is None:
+            if parsed is None:            # [Data] 줄이 아니면 건너뛰고 다음 줄
                 continue
-            sample = self._to_sample(parsed)
-        return sample
+            return self._to_sample(parsed)
 
     def _to_sample(self, parsed: dict) -> SensorSample:
         if self._first_timestamp_ms is None:
