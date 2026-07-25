@@ -1124,7 +1124,12 @@ async def spacebio_ws(ws: WebSocket):
     sequence = 0
     try:
         while True:
-            data = await proxy.get("/api/spacebio/status", None)
+            # proxy.get은 envelope 전체({schema_version, request_id, data:{...}})를
+            # 돌려준다. 브라우저는 message.data.sensor를 기대하므로 내부 data만
+            # 꺼내 보낸다 — envelope째 감싸면 data.data.sensor로 이중 중첩돼
+            # 화면 차트가 샘플을 못 받는다(2026-07-25 실제 발생).
+            envelope = await proxy.get("/api/spacebio/status", None)
+            data = envelope.get("data", envelope) if isinstance(envelope, dict) else envelope
             sequence += 1
             await ws.send_json({"type": "status", "sequence": sequence, "data": data})
             await asyncio.sleep(0.2)          # 브라우저 중계 5 Hz 상한
