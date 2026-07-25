@@ -24,7 +24,7 @@ def test_state_enums_have_exactly_the_specified_members():
     assert {s.value for s in m.SessionState} == {
         "idle", "preparing", "recording", "completed", "partial", "failed",
     }
-    assert {s.value for s in m.SensorMode} == {"CSV_REPLAY", "SYNTHETIC"}
+    assert {s.value for s in m.SensorMode} == {"CSV_REPLAY", "SYNTHETIC", "SERIAL_LIVE"}
     assert m.PUMP_MODE == "SIMULATED"
 
 
@@ -451,3 +451,44 @@ def test_websocket_message_shape():
     assert dumped["type"] == "status"
     assert dumped["sequence"] == 7
     assert set(dumped["data"]) == {"gateway", "sensor", "pump", "session"}
+
+
+# ─────────────────────────── 실기 확장 (2026-07-25) ───────────────────────────
+
+def test_serial_live_sample_allows_null_raw_adc():
+    """실기 센서는 raw ADC를 내지 않는다 — None이 허용돼야 실측 스트림이 기록된다."""
+    s = m.SensorSample(
+        source_timestamp_ms=15821367, session_elapsed_ms=0, resistance_ohm=1_000_000.0,
+        delta_r_over_r0=0.0, temperature_c=25.0, battery_pct=0,
+    )
+    assert s.raw_adc is None
+
+
+def test_pump_step_request_bounds_match_firmware():
+    assert m.PumpStepRequest(steps=200, spm=600).steps == 200
+    for bad in ({"steps": 0, "spm": 600}, {"steps": 200, "spm": 0},
+                {"steps": 200, "spm": 2401}):
+        with pytest.raises(ValidationError):
+            m.PumpStepRequest(**bad)
+
+
+def test_pump_step_request_forbids_unknown_fields():
+    with pytest.raises(ValidationError):
+        m.PumpStepRequest(steps=200, spm=600, target_volume_ul=100.0)
+
+
+def test_pump_status_carries_wireless_step_telemetry():
+    status = m.PumpStatus(mode=m.PUMP_MODE_WIRELESS, position_steps=782, spm=2400)
+    assert status.mode == "WIRELESS"
+    assert status.position_steps == 782
+    assert status.spm == 2400
+
+
+def test_datasets_response_hides_paths():
+    resp = m.DatasetsResponse(datasets=(
+        m.DatasetInfo(dataset_id="d1", sample_count=522, provenance="ThinkPad"),
+    ))
+    dumped = resp.model_dump()
+    assert dumped["datasets"][0]["dataset_id"] == "d1"
+    assert "filename" not in dumped["datasets"][0]
+    assert "path" not in dumped["datasets"][0]

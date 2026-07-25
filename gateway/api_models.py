@@ -71,6 +71,8 @@ class SessionState(str, Enum):
 class SensorMode(str, Enum):
     CSV_REPLAY = "CSV_REPLAY"
     SYNTHETIC = "SYNTHETIC"
+    #: 실기 — Nano 33 BLE(nRF52840)가 /dev/ttyACM0으로 흘리는 실측 스트림.
+    SERIAL_LIVE = "SERIAL_LIVE"
 
 
 # ─────────────────────────── 공용 타입 ───────────────────────────
@@ -191,6 +193,24 @@ class SensorStopRequest(_Request):
 
 # ─────────────────────────── 펌프 요청 ───────────────────────────
 
+#: 무선 펌프 보드(ESP32-C6) 펌웨어 clampSpm 범위 (firmware SPM_MIN/SPM_MAX).
+PUMP_SPM_MIN = 1
+PUMP_SPM_MAX = 2400
+PumpSpm = Annotated[int, Field(ge=PUMP_SPM_MIN, le=PUMP_SPM_MAX)]
+PumpSteps = Annotated[int, Field(ge=1, le=100_000)]
+
+
+class PumpStepRequest(_Request):
+    """실기 무선 펌프의 스텝 단위 명령 (µL 보정이 없어 스텝으로 노출).
+
+    펌웨어는 부피가 아니라 스텝으로만 돈다. µL 보정 상수가 확보되기 전까지
+    부피로 표기하면 거짓이 되므로 스텝을 그대로 쓴다.
+    """
+
+    steps: PumpSteps
+    spm: PumpSpm = 1200
+
+
 class PumpDispenseRequest(_Request):
     rate_ul_s: RateUlS
     target_volume_ul: VolumeUlS
@@ -256,7 +276,10 @@ class SensorSample(_Status):
     source_timestamp_ms: int
     session_elapsed_ms: int
     loop_count: int = 0
-    raw_adc: RawAdc
+    #: 실기 센서(SERIAL_LIVE)의 [Data] 로그 형식에는 raw ADC가 없다. 저항값에서
+    #: 역산하면 측정하지 않은 값을 지어내는 셈이라 None으로 둔다. CSV 재생과
+    #: 합성 모드는 값을 채운다. 저장 CSV에서는 빈 칸이 된다.
+    raw_adc: Optional[RawAdc] = None
     resistance_ohm: Annotated[float, Field(allow_inf_nan=False)]
     delta_r_over_r0: Annotated[float, Field(allow_inf_nan=False)]
     temperature_c: Annotated[float, Field(allow_inf_nan=False)]
@@ -295,14 +318,34 @@ class SensorStatus(_Status):
     sample: Optional[SensorSample] = None
 
 
+#: 무선 실기 펌프 백엔드가 붙었을 때의 mode 값.
+PUMP_MODE_WIRELESS = "WIRELESS"
+
+
 class PumpStatus(_Status):
-    mode: Literal["SIMULATED"] = PUMP_MODE
+    #: SIMULATED = 모의, WIRELESS = 실기 MQTT 펌프 보드.
+    mode: str = PUMP_MODE
     state: PumpState = PumpState.IDLE
     estop_latched: bool = False
     rate_ul_s: float = 0.0
     target_volume_ul: Optional[float] = None
     delivered_volume_ul: float = 0.0
     session_cumulative_volume_ul: float = 0.0
+    #: 실기 스텝 텔레메트리 (펌웨어 status의 pos/spm/run). 모의 모드에서는 None.
+    position_steps: Optional[int] = None
+    spm: Optional[int] = None
+
+
+class DatasetInfo(_Status):
+    """CSV 재생용 dataset 한 건의 공개 메타 — 경로·파일명은 노출하지 않는다."""
+
+    dataset_id: str
+    sample_count: int
+    provenance: str
+
+
+class DatasetsResponse(_Status):
+    datasets: tuple[DatasetInfo, ...]
 
 
 class SessionStatus(_Status):
