@@ -76,6 +76,11 @@ MAX_PUBLISH_HZ = 10.0
 
 _ESTOP_LATCH_FILENAME = "estop_latch.json"
 
+#: 한 폴링 tick에서 소스로부터 꺼낼 샘플 수 상한. 소스가 폴링보다 빠를 때
+#: (BLE 실측 ~30Hz vs 폴링 10Hz) 밀린 것을 따라잡되, 한 tick이 lock을 오래
+#: 붙잡지 않도록 묶는다. 10Hz × 64 = 초당 640샘플까지 감당한다.
+MAX_SAMPLES_PER_TICK = 64
+
 SensorConfigCommand = Union[
     SensorConfigureCsvRequest,
     SensorConfigureSyntheticRequest,
@@ -363,24 +368,41 @@ class GatewayRuntime:
                 async with self._lock:
                     if self._sensor_source is None:
                         return
-                    try:
-                        sample = self._sensor_source.tick()
-                    except SensorSourceError:
-                        # 실기 소스가 자원을 못 잡은 경우(BLE 스캔 실패, 포트 소실 등).
-                        # 예전엔 이 예외가 루프를 조용히 죽여 상태만 running으로 남았고
-                        # 운영자가 이유를 알 수 없었다 — FAULT로 올리고 로그를 남긴다.
-                        self._sensor_state = SensorState.FAULT
-                        self._sensor_task = None
-                        logger.exception("sensor source failed; marking sensor FAULT")
-                        return
-                    if sample is None:
-                        continue
-                    self._sensor_sample = sample
-                    if self._active_store is not None:
+                    # 소스가 폴링 주기보다 빠를 수 있다(BLE 실측 ~30Hz vs 폴링 10Hz).
+                    # tick()은 호출당 하나만 주므로 하나씩 꺼내면 버퍼가 계속 쌓여
+                    # 표시값이 벽시계보다 뒤처지고(실측 0.39배) 결국 오래된 샘플이
+                    # 버려진다. 밀린 것을 모두 꺼내 **전부 저장**하고 화면에는 가장
+                    # 최근 것을 쓴다. 한 tick의 작업량은 상한으로 묶는다.
+                    latest: Optional[SensorSample] = None
+                    drained = 0
+                    while drained < MAX_SAMPLES_PER_TICK:
                         try:
-                            self._active_store.append_sensor(sample)
-                        except SessionIoError:
-                            logger.exception("failed to append sensor sample to session store")
+                            sample = self._sensor_source.tick()
+                        except SensorSourceError:
+                            # 실기 소스가 자원을 못 잡은 경우(BLE 스캔 실패, 포트 소실 등).
+                            # 예전엔 이 예외가 루프를 조용히 죽여 상태만 running으로 남았고
+                            # 운영자가 이유를 알 수 없었다 — FAULT로 올리고 로그를 남긴다.
+                            self._sensor_state = SensorState.FAULT
+                            self._sensor_task = None
+                            logger.exception("sensor source failed; marking sensor FAULT")
+                            return
+                        if sample is None:
+                            break
+                        drained += 1
+                        latest = sample
+                        if self._active_store is not None:
+                            try:
+                                self._active_store.append_sensor(sample)
+                            except SessionIoError:
+                                logger.exception(
+                                    "failed to append sensor sample to session store")
+                    if latest is None:
+                        continue
+                    if drained == MAX_SAMPLES_PER_TICK:
+                        logger.warning(
+                            "센서 샘플이 폴링보다 빠르다 — 한 tick에서 %d개를 처리했다. "
+                            "지속되면 버퍼가 밀린다", drained)
+                    self._sensor_sample = latest
         except asyncio.CancelledError:
             raise
 

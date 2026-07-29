@@ -458,7 +458,10 @@ def test_config_yaml_never_binds_0000_and_gateway_section_is_fixed():
 
     raw = yaml.safe_load(text)
     assert raw["gateway"] == {
-        "host": "127.0.0.1", "port": 8010, "sensor_publish_hz": 10,
+        # sensor_publish_hz는 센서 폴링(수집) 주파수다. 실기 BLE 센서 실측이
+        # 28 Hz라 10으로는 못 따라가 표시값이 벽시계의 0.39배로 밀렸다(2026-07-29).
+        # 브라우저 발행은 MAX_PUBLISH_HZ(10)로 따로 clamp되므로 화면 부하는 그대로다.
+        "host": "127.0.0.1", "port": 8010, "sensor_publish_hz": 50,
         "browser_publish_hz": 5, "min_free_bytes": 524288000,
     }
     assert raw["sensor"] == {
@@ -477,7 +480,7 @@ def test_load_config_matches_spec_defaults():
     config: GatewayConfig = load_config(REPO_ROOT / "config.yaml")
     assert config.host == "127.0.0.1"
     assert config.port == 8010
-    assert config.sensor_publish_hz == 10
+    assert config.sensor_publish_hz == 50      # 실기 BLE 28 Hz를 따라잡는 폴링 주파수
     assert config.browser_publish_hz == 5
     assert config.min_free_bytes == 524_288_000
     assert config.pump_min_volume_ul == 1.0

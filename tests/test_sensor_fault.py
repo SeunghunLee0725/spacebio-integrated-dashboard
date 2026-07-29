@@ -86,3 +86,71 @@ async def test_stop_releases_source_but_keeps_it_configured(tmp_path: Path):
 
     assert source.closed is True                    # 자원은 놓았고
     assert runtime._sensor_source is source         # 설정은 남아 있다
+
+
+# ─────────────── 소스가 폴링보다 빠를 때 (BLE 28Hz vs 폴링) ───────────────
+
+
+class BurstSource:
+    """미리 넣어둔 샘플을 tick()당 하나씩 내놓는다 — 실기 BLE 버퍼와 같은 형태."""
+
+    def __init__(self, samples):
+        self._pending = list(samples)
+        self.started = False
+
+    def start(self) -> None:
+        self.started = True
+
+    def tick(self):
+        return self._pending.pop(0) if self._pending else None
+
+
+def _sample(ms: int):
+    from gateway.api_models import SensorSample
+    return SensorSample(
+        source_timestamp_ms=ms, session_elapsed_ms=ms, loop_count=0,
+        raw_adc=-7262, resistance_ohm=284_300.0, delta_r_over_r0=0.0,
+        temperature_c=25.0, battery_pct=0,
+    )
+
+
+@pytest.mark.asyncio
+async def test_poll_drains_backlog_so_latest_sample_is_current(tmp_path: Path):
+    """한 tick에 하나만 꺼내면 소스가 빠를 때 표시값이 계속 뒤처진다.
+
+    실기에서 BLE 28Hz / 폴링 10Hz 조합일 때 보드시각이 벽시계의 0.39배로만
+    진행했다. 밀린 것을 모두 꺼내 마지막 것을 표시해야 한다.
+    """
+    runtime = GatewayRuntime(make_gw_config(tmp_path, sensor_publish_hz=50.0))
+    runtime._sensor_source = BurstSource([_sample(m) for m in (10, 20, 30, 40, 50)])
+
+    await runtime.start_sensor("r1")
+    for _ in range(50):
+        await asyncio.sleep(0.02)
+        s = (await runtime.status()).sensor.sample
+        if s is not None and s.source_timestamp_ms == 50:
+            break
+    await runtime.stop_sensor("r2")
+
+    sample = (await runtime.status()).sensor.sample
+    assert sample is not None
+    assert sample.source_timestamp_ms == 50, "가장 최근 샘플을 표시해야 한다"
+
+
+@pytest.mark.asyncio
+async def test_poll_bounds_work_per_tick(tmp_path: Path):
+    """밀린 게 아무리 많아도 한 tick이 lock을 무한정 붙잡으면 안 된다."""
+    from gateway.runtime import MAX_SAMPLES_PER_TICK
+
+    runtime = GatewayRuntime(make_gw_config(tmp_path, sensor_publish_hz=50.0))
+    huge = [_sample(m) for m in range(0, (MAX_SAMPLES_PER_TICK + 20) * 10, 10)]
+    source = BurstSource(huge)
+    runtime._sensor_source = source
+
+    await runtime.start_sensor("r1")
+    await asyncio.sleep(0.03)          # tick 한 번 정도
+    remaining_after_one_tick = len(source._pending)
+    await runtime.stop_sensor("r2")
+
+    assert remaining_after_one_tick >= 20 - MAX_SAMPLES_PER_TICK * 1, \
+        "한 tick에서 상한을 넘겨 처리하면 안 된다"

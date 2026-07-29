@@ -33,7 +33,12 @@ store:
 gateway:
   host: 127.0.0.1
   port: 8010
-  sensor_publish_hz: 10
+  # 센서 폴링(=수집) 주파수. 소스보다 느리면 버퍼가 쌓여 표시값이 뒤처지고
+  # 결국 오래된 샘플이 버려진다. 실기 BLE 센서 실측이 28 Hz(간격 중앙값 45ms,
+  # 최대 196ms)라 여유를 두어 50으로 잡는다.
+  # ⚠ 브라우저 WebSocket 발행은 MAX_PUBLISH_HZ(10)로 따로 clamp되므로
+  #   이 값을 올려도 화면 갱신 부하는 늘지 않는다.
+  sensor_publish_hz: 50
   browser_publish_hz: 5
   min_free_bytes: 524288000
 
