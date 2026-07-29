@@ -24,7 +24,9 @@ def test_state_enums_have_exactly_the_specified_members():
     assert {s.value for s in m.SessionState} == {
         "idle", "preparing", "recording", "completed", "partial", "failed",
     }
-    assert {s.value for s in m.SensorMode} == {"CSV_REPLAY", "SYNTHETIC", "SERIAL_LIVE"}
+    assert {s.value for s in m.SensorMode} == {
+        "CSV_REPLAY", "SYNTHETIC", "SERIAL_LIVE", "BLE_LIVE",
+    }
     assert m.PUMP_MODE == "SIMULATED"
 
 
@@ -268,6 +270,38 @@ def test_configure_request_dispatches_on_mode():
 def test_configure_request_rejects_unknown_mode():
     with pytest.raises(ValidationError):
         m.parse_sensor_configure({"request_id": "r1", "mode": "LIVE_BLE"})
+
+
+def test_ble_live_configure_defaults_device_name_to_none():
+    """이름을 안 주면 None — 런타임이 config.yaml의 ble.device_name을 쓴다."""
+    req = m.parse_sensor_configure({"request_id": "r1", "mode": "BLE_LIVE"})
+    assert isinstance(req, m.SensorConfigureBleLiveRequest)
+    assert req.device_name is None
+    assert req.scan_timeout_s == 15.0
+
+
+def test_ble_live_configure_accepts_overrides():
+    req = m.parse_sensor_configure({
+        "request_id": "r1", "mode": "BLE_LIVE",
+        "device_name": "ResistanceSensor2", "scan_timeout_s": 30.0,
+    })
+    assert req.device_name == "ResistanceSensor2"
+    assert req.scan_timeout_s == 30.0
+
+
+@pytest.mark.parametrize("timeout", [0.0, -1.0, 121.0])
+def test_ble_live_configure_rejects_bad_scan_timeout(timeout):
+    with pytest.raises(ValidationError):
+        m.parse_sensor_configure({
+            "request_id": "r1", "mode": "BLE_LIVE", "scan_timeout_s": timeout,
+        })
+
+
+def test_ble_live_configure_rejects_empty_device_name():
+    with pytest.raises(ValidationError):
+        m.parse_sensor_configure({
+            "request_id": "r1", "mode": "BLE_LIVE", "device_name": "",
+        })
 
 
 # ─────────────────────────── 세션 요청 ───────────────────────────

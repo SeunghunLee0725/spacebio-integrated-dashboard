@@ -33,6 +33,7 @@ from gateway.api_models import (
     PumpStatus,
     PumpStopRequest,
     PumpStepRequest,
+    SensorConfigureBleLiveRequest,
     SensorConfigureCsvRequest,
     SensorConfigureSerialLiveRequest,
     SensorConfigureSyntheticRequest,
@@ -61,6 +62,7 @@ from gateway.session_store import (
 from gateway.runtime_config import GatewayConfig, load_config
 from gateway.mqtt_pump import MqttPump
 from gateway.mqtt_pump import PumpConflictError as MqttPumpConflictError
+from gateway.ble_sensor import BleSensorSource
 from gateway.serial_sensor import SerialSensorSource
 from gateway.simulated_pump import FileEstopLatchPersistence, SimulatedPump
 from gateway.synthetic_sensor import SyntheticSensorSource
@@ -77,6 +79,7 @@ SensorConfigCommand = Union[
     SensorConfigureCsvRequest,
     SensorConfigureSyntheticRequest,
     SensorConfigureSerialLiveRequest,
+    SensorConfigureBleLiveRequest,
 ]
 PumpCommand = Union[
     PumpDispenseRequest, PumpStopRequest, PumpEmergencyStopRequest,
@@ -263,6 +266,12 @@ class GatewayRuntime:
                     baudrate=self._config.sensor_serial_baudrate,
                 )
                 mode = SensorMode.SERIAL_LIVE
+            elif isinstance(request, SensorConfigureBleLiveRequest):
+                source = BleSensorSource(
+                    device_name=request.device_name or self._config.ble_device_name,
+                    scan_timeout_s=request.scan_timeout_s,
+                )
+                mode = SensorMode.BLE_LIVE
             else:
                 source = SyntheticSensorSource(
                     baseline_resistance_ohm=request.baseline_resistance_ohm,
@@ -276,6 +285,10 @@ class GatewayRuntime:
                     adc_full_scale=self._config.adc_full_scale,
                 )
                 mode = SensorMode.SYNTHETIC
+
+            # 이전 소스를 반드시 닫는다. 안 닫으면 시리얼 포트가 잡혀 있거나
+            # BLE 연결이 남아 **재설정 후 다시 붙지 못한다.**
+            await self._release_sensor_source()
 
             self._sensor_source = source
             self._sensor_mode = mode
@@ -310,7 +323,33 @@ class GatewayRuntime:
             with contextlib.suppress(asyncio.CancelledError):
                 await task
         async with self._lock:
+            # 실기 소스는 하드웨어 자원을 잡고 있다 — 정지 시 반드시 놓아준다.
+            # (BLE는 연결이 남으면 다음 start에서 스캔조차 실패한다)
+            await self._release_sensor_source()
             return self._sensor_status_locked()
+
+    async def _release_sensor_source(self) -> None:
+        """센서 소스가 잡은 자원(시리얼 포트/BLE 연결)을 놓아준다.
+
+        소스마다 정리 방식이 다르다 — 비동기 `aclose()`가 있으면 그것을,
+        없으면 동기 `close()`를. CSV/합성 소스는 둘 다 없어 아무것도 하지 않는다.
+
+        ⚠ 소스 **객체는 남긴다.** 여기서 None으로 지우면 stop 뒤 start가
+        "sensor is not configured"로 막힌다. 시리얼·BLE 모두 close 후
+        start에서 자원을 다시 잡을 수 있게 되어 있다.
+        """
+        source = self._sensor_source
+        if source is None:
+            return
+        aclose = getattr(source, "aclose", None)
+        close = getattr(source, "close", None)
+        try:
+            if aclose is not None:
+                await aclose()
+            elif close is not None:
+                close()
+        except Exception:  # noqa: BLE001 — 정리 실패가 API 호출을 깨뜨리면 안 된다
+            logger.warning("failed to release sensor source", exc_info=True)
 
     async def _sensor_poll_loop(self) -> None:
         interval = 1.0 / self._config.sensor_publish_hz

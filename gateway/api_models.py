@@ -71,8 +71,12 @@ class SessionState(str, Enum):
 class SensorMode(str, Enum):
     CSV_REPLAY = "CSV_REPLAY"
     SYNTHETIC = "SYNTHETIC"
-    #: 실기 — Nano 33 BLE(nRF52840)가 /dev/ttyACM0으로 흘리는 실측 스트림.
+    #: 실기 — Nano 33 BLE(nRF52840)가 /dev/ttyACM*으로 흘리는 실측 스트림.
+    #: 사람이 읽는 [Data] 로그 형식이라 raw_adc가 없다.
     SERIAL_LIVE = "SERIAL_LIVE"
+    #: 실기 — 같은 센서의 **무선 경로**. 21바이트 struct를 BLE notify로 받는다.
+    #: 시리얼과 달리 raw_adc가 들어 있다.
+    BLE_LIVE = "BLE_LIVE"
 
 
 # ─────────────────────────── 공용 타입 ───────────────────────────
@@ -176,11 +180,24 @@ class SensorConfigureSerialLiveRequest(_Request):
     mode: Literal[SensorMode.SERIAL_LIVE] = SensorMode.SERIAL_LIVE
 
 
+class SensorConfigureBleLiveRequest(_Request):
+    """실기 센서 BLE 직결 설정.
+
+    `device_name`을 비우면 config.yaml의 `ble.device_name`을 쓴다 — 보드를
+    바꿔 끼울 때만 요청에서 덮어쓴다.
+    """
+
+    mode: Literal[SensorMode.BLE_LIVE] = SensorMode.BLE_LIVE
+    device_name: Optional[Annotated[str, Field(min_length=1, max_length=64)]] = None
+    scan_timeout_s: Annotated[float, Field(gt=0.0, le=120.0)] = 15.0
+
+
 SensorConfigureRequest = Annotated[
     Union[
         SensorConfigureCsvRequest,
         SensorConfigureSyntheticRequest,
         SensorConfigureSerialLiveRequest,
+        SensorConfigureBleLiveRequest,
     ],
     Field(discriminator="mode"),
 ]
