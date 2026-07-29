@@ -308,6 +308,10 @@ class GatewayRuntime:
             self._sensor_mode = mode
             self._sensor_state = SensorState.IDLE
             self._sensor_sample = None
+            # 세션이 먼저 열렸다면 store 는 기본값(CSV_REPLAY)으로 만들어져 있다.
+            # 그대로 두면 실측 데이터가 재생 데이터로 기록된다 — 실제 모드를 알린다.
+            if self._active_store is not None:
+                self._active_store.set_sensor_mode(mode)
             return self._sensor_status_locked()
 
     async def start_sensor(self, request_id: str) -> SensorStatus:

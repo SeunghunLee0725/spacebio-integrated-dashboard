@@ -170,6 +170,19 @@ class SessionStore:
         self._persist_manifest()
         return self.snapshot()
 
+    def set_sensor_mode(self, mode: SensorMode) -> None:
+        """기록 중에 센서 모드가 정해지면 반영한다.
+
+        세션이 센서 설정보다 먼저 열릴 수 있다(화면이 "측정 시작" 하나로 세션까지
+        여는 흐름). 그때 store 는 기본값 CSV_REPLAY 로 만들어지는데, 그대로 두면
+        **실측 데이터가 재생 데이터로 기록된다** — manifest 도 CSV 행의
+        source_mode 도 전부 거짓이 된다(2026-07-29 실기에서 실제로 그랬다).
+        """
+        self._sensor_mode = mode.value
+        if self._active is not None:
+            self._active = replace(self._active, sensor_mode=mode.value)
+            self._persist_manifest()
+
     def update_run_id(self, request: SessionUpdateRequest) -> SessionSnapshot:
         self._require_active(request.session_id)
         if self._apply_run_id(request.clinostat_run_id):

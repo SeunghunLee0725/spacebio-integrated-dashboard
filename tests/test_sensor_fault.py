@@ -234,3 +234,51 @@ async def test_session_status_reports_data_dir(tmp_path: Path):
     assert status.data_dir is not None
     assert status.data_dir.endswith(f"sessions/{sid}")
     assert Path(status.data_dir).is_dir(), "실제로 만들어진 디렉터리를 가리켜야 한다"
+
+
+# ───── 세션이 먼저 열려도 실측 모드가 기록돼야 한다 (2026-07-29 실기 버그) ─────
+
+
+@pytest.mark.asyncio
+async def test_live_mode_is_recorded_even_when_session_opens_first(tmp_path: Path):
+    """화면이 "측정 시작" 하나로 세션까지 여는 흐름에서는 세션이 센서 설정보다
+    먼저 열린다. 그때 store 가 기본값 CSV_REPLAY 로 만들어지는 바람에 **실측
+    데이터가 재생 데이터로 기록됐다** — manifest 도 CSV 행의 source_mode 도 거짓.
+    """
+    import csv as _csv
+    import json as _json
+
+    from gateway.api_models import (
+        SensorConfigureBleLiveRequest, SessionStartRequest,
+    )
+
+    runtime = GatewayRuntime(make_gw_config(tmp_path, sensor_publish_hz=50.0))
+    sid = "spacebio_20260729_190000_livemode"
+    await runtime.session_command(SessionStartRequest(
+        request_id="s1", session_id=sid, experiment_name="live",
+        started_at=datetime.now(timezone.utc),
+    ))
+
+    # 세션이 열린 뒤에 센서를 설정한다 (실제 화면 순서)
+    await runtime.configure_sensor(SensorConfigureBleLiveRequest(request_id="c1"))
+    runtime._sensor_source = BurstSource([_sample(10), _sample(20)])
+    await runtime.start_sensor("r1")
+    for _ in range(50):
+        await asyncio.sleep(0.02)
+        if (await runtime.status()).sensor.sample is not None:
+            break
+    await runtime.stop_sensor("r2")
+
+    data_dir = Path((await runtime.status()).session.data_dir)
+    # 세션을 닫아야 버퍼가 flush 되고 파일이 확정된다.
+    from gateway.api_models import SessionFinishRequest
+    await runtime.session_command(SessionFinishRequest(
+        request_id="s2", session_id=sid, finished_at=datetime.now(timezone.utc),
+    ))
+    manifest = _json.loads((data_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["sensor_mode"] == "BLE_LIVE", "manifest 가 재생 모드로 거짓 기록됐다"
+
+    rows = list(_csv.DictReader((data_dir / "sensor_samples.csv").open(encoding="utf-8")))
+    assert rows, "샘플이 기록되지 않았다"
+    assert {r["source_mode"] for r in rows} == {"BLE_LIVE"}, \
+        "CSV 행의 source_mode 가 실제 모드와 다르다"
