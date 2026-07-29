@@ -384,3 +384,51 @@ def test_chart_resets_when_a_new_measurement_starts(work):
     start = work.index("sbEl('resistanceStart').onclick")
     section = work[start:start + 900]
     assert "spacebioResetChart" in section
+
+
+# ───── 한 화면 배치 (2026-07-29) ─────
+#
+# SpaceBio 패널이 클리노스텟 전체 아래(top 1,347)에 있어 저항 정보를 보려면 반드시
+# 스크롤해야 했다. 실측 2,426px → 32인치(2560×1440) 실사용 높이 약 1,320px 초과.
+# 마크업을 고치지 않고(= baseline 보존 계약) 로드 후 DOM 을 옮겨 3열로 만든다.
+
+def test_one_screen_layout_is_applied_at_runtime(work):
+    """baseline 마크업을 고치지 않고 런타임에 옮긴다."""
+    assert "spacebioApplyOneScreenLayout" in work
+    start = work.index("function spacebioApplyOneScreenLayout")
+    section = work[start:work.index(chr(10) + "}", start)]
+    assert "main.appendChild(panel)" in section, "패널을 .main 의 3번째 열로 옮겨야 한다"
+
+
+def test_one_screen_layout_runs_on_load(work):
+    assert "DOMContentLoaded', spacebioApplyOneScreenLayout" in work
+
+
+def test_three_columns_only_on_wide_screens(work):
+    """좁은 화면에서 3열은 읽을 수 없다 — 기존처럼 쌓여야 한다."""
+    assert "@media (min-width: 1600px)" in work
+    assert "@media (max-width: 1599px)" in work
+    narrow = work[work.index("@media (max-width: 1599px)"):][:200]
+    assert "grid-column: 1 / -1" in narrow, "좁을 때 패널이 전체 폭을 차지해야 한다"
+
+
+@pytest.mark.parametrize("folded", [
+    "연결 설정", "논문 메트릭", "기록 상태 · 펌프",
+])
+def test_secondary_sections_are_collapsible(work, folded):
+    """상시 볼 필요 없는 것은 접는다(연결 523px · 메트릭 587px 실측)."""
+    assert folded in work
+
+
+def test_layout_failure_does_not_break_the_page(work):
+    """배치 실패가 기능을 막으면 안 된다 — 요소가 없으면 조용히 넘어간다."""
+    start = work.index("function spacebioApplyOneScreenLayout")
+    section = work[start:work.index(chr(10) + "}", start)]
+    assert "if (!main || !panel) return;" in section
+
+
+def test_camera_stacks_above_rpm_chart_in_narrow_column(work):
+    """열이 좁아지면 가로 2분할 카메라가 세로로 길쭉해진다(실측 285×300)."""
+    wide = work[work.index("@media (min-width: 1600px)"):]
+    wide = wide[:wide.index(chr(10) + "}")]
+    assert "cam-chart-row" in wide and "16 / 9" in wide
