@@ -63,6 +63,7 @@ from gateway.runtime_config import GatewayConfig, load_config
 from gateway.mqtt_pump import MqttPump
 from gateway.mqtt_pump import PumpConflictError as MqttPumpConflictError
 from gateway.ble_sensor import BleSensorSource
+from gateway.sensor_source import SensorSourceError
 from gateway.serial_sensor import SerialSensorSource
 from gateway.simulated_pump import FileEstopLatchPersistence, SimulatedPump
 from gateway.synthetic_sensor import SyntheticSensorSource
@@ -359,7 +360,16 @@ class GatewayRuntime:
                 async with self._lock:
                     if self._sensor_source is None:
                         return
-                    sample = self._sensor_source.tick()
+                    try:
+                        sample = self._sensor_source.tick()
+                    except SensorSourceError:
+                        # 실기 소스가 자원을 못 잡은 경우(BLE 스캔 실패, 포트 소실 등).
+                        # 예전엔 이 예외가 루프를 조용히 죽여 상태만 running으로 남았고
+                        # 운영자가 이유를 알 수 없었다 — FAULT로 올리고 로그를 남긴다.
+                        self._sensor_state = SensorState.FAULT
+                        self._sensor_task = None
+                        logger.exception("sensor source failed; marking sensor FAULT")
+                        return
                     if sample is None:
                         continue
                     self._sensor_sample = sample
