@@ -46,8 +46,18 @@ bash deploy/setup.sh          # venv + 잠긴 의존성
 PYTHON=python3.14 bash deploy/setup.sh
 ```
 
+`setup.sh`는 **런타임 의존성만** 깐다. 테스트를 돌리려면 dev 의존성을 더한다.
+
 ```bash
+.venv/bin/pip install -r requirements-dev.txt -c <위 표의 잠금 파일>
 .venv/bin/python -m pytest -q      # 537개가 통과해야 한다
+```
+
+새 클론에서 게이트웨이만 띄워 보려면 dev 의존성 없이도 된다.
+
+```bash
+.venv/bin/python -m uvicorn gateway.app:app --host 127.0.0.1 --port 8010
+curl -s localhost:8010/health
 ```
 
 ## 3. 파이 런타임 배치
