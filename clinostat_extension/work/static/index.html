@@ -2281,15 +2281,19 @@ document.addEventListener('DOMContentLoaded', spacebioInit);
      ⚠ .metric-paper 의 min-height:280px 이 카드 높이를 잡고 있었다
        (.body 는 flex:1 이라 카드를 따라간다) — 그걸 풀어야 줄어든다. */
   .metrics-grid {
-    grid-column: 1 / -1 !important;
-    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
     gap: 10px !important;
   }
   .metrics-grid .metric-paper {
     min-height: 0 !important;
-    height: 215px !important;
+    height: 210px !important;
     padding: 10px !important;
+    /* 카드를 줄이면 I(5°) 의 주석·중력벡터 플롯이 카드 밖으로 흘러나온다. */
+    overflow: hidden !important;
   }
+  /* 중력벡터 분포는 Plotly 다. #sphereDiv 의 min-height:240px 이 카드보다 커서
+     넘쳤다 — 풀어 주면 responsive:true 가 알아서 다시 그린다. */
+  #sphereDiv { min-height: 0 !important; }
   .metrics-grid .metric-paper h4 {
     font-size: 0.72em !important;
     margin-bottom: 4px !important;
@@ -2301,14 +2305,14 @@ document.addEventListener('DOMContentLoaded', spacebioInit);
   /* ⚠ 종횡비로 두면 열이 넓어진 만큼 카메라가 높아져(실측 폭 1,083 → 높이 648)
      넓힌 이득을 그대로 까먹는다. 카드 높이를 고정하고 영상이 그 안을 채우게 한다
      (img 는 object-fit: contain 이라 비율이 깨지지 않고 레터박스로 들어간다). */
-  .cam-chart-row .cam-card { height: 400px !important; }
+  .cam-chart-row .cam-card { height: 330px !important; }
   .cam-chart-row .cam-card .cam-wrap {
     aspect-ratio: auto !important;
     flex: 1 1 auto !important;
     min-height: 0 !important;
     height: auto !important;
   }
-  .chart-card { height: 280px !important; }
+  .chart-card { height: 250px !important; }
 }
 /* 1600px 미만에서는 옮겨온 패널이 두 열을 모두 차지해 원래 모습이 유지된다. */
 @media (max-width: 1599px) {
@@ -2353,10 +2357,13 @@ function spacebioApplyOneScreenLayout() {
     .find((card) => /Connection/i.test(card.textContent.slice(0, 40)));
   spacebioFoldInPlace(connection, '▸ 연결 설정 (AC Servo · BLDC · IMU)');
 
-  // 논문 메트릭 4개: 실시간으로 계속 봐야 하므로 접지 않고, 하단 전폭 한 줄로 옮긴다.
-  // 세로로 쌓인 2×2(587px)를 가로 4열(215px)로 바꾸는 것이 요점이다.
+  // 논문 메트릭 4개: 접지 않고 실시간으로 본다. 중력센서(IMU) 바로 아래에 2×2 로 둔다.
+  // 원본은 600px 폭 2×2 로 587px 를 썼는데, 카드 높이를 210px 로 묶어 380px 로 줄인다.
   const metrics = document.querySelector('.metrics-grid');
-  if (metrics && metrics.parentElement !== main) main.appendChild(metrics);
+  const imuRow = document.querySelector('.sensor-grid');
+  if (metrics && imuRow && metrics.previousElementSibling !== imuRow) {
+    imuRow.parentNode.insertBefore(metrics, imuRow.nextSibling);
+  }
 
   // 측정값 5행을 2열로 묶는다 — 세로로 나열하면 카드가 그만큼 길어진다.
   const readoutIds = ['resistanceValue', 'resistanceDelta', 'resistanceAdc',
@@ -2393,8 +2400,16 @@ document.addEventListener('DOMContentLoaded', () => {
   spacebioApplyOneScreenLayout();
   // 카드 크기가 바뀌었으니 차트(Chart.js·Plotly)에 다시 그리라고 알린다.
   // 한 번만으로는 Plotly 가 옛 크기를 쓰는 경우가 있어 잠시 뒤 한 번 더 보낸다.
-  window.dispatchEvent(new Event('resize'));
-  setTimeout(() => window.dispatchEvent(new Event('resize')), 600);
+  const nudgeCharts = () => {
+    window.dispatchEvent(new Event('resize'));
+    // Plotly 는 resize 이벤트만으로 안 따라오는 경우가 있어 자체 API 로도 부른다.
+    if (window.Plotly) {
+      document.querySelectorAll('.js-plotly-plot')
+        .forEach((el) => { try { Plotly.Plots.resize(el); } catch (e) { /* 무시 */ } });
+    }
+  };
+  nudgeCharts();
+  setTimeout(nudgeCharts, 600);
 });
 </script>
 </body>

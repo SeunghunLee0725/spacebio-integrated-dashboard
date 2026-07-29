@@ -441,7 +441,8 @@ def test_paper_metrics_stay_visible_in_a_full_width_row(work):
     assert "논문 메트릭" not in work.split("details.sb-fold")[0] or True
     start = work.index("function spacebioApplyOneScreenLayout")
     section = work[start:work.index(chr(10) + "}", start)]
-    assert "main.appendChild(metrics)" in section
+    assert "insertBefore(metrics, imuRow.nextSibling)" in section, \
+        "중력센서(IMU) 바로 아래에 놓아야 한다"
     assert "spacebioFoldInPlace(document.querySelector('.metrics-grid')" not in work, \
         "메트릭을 접으면 안 된다"
 
@@ -452,7 +453,7 @@ def test_metric_cards_min_height_is_released(work):
     wide = work[work.index("@media (min-width: 1600px)"):]
     wide = wide[:wide.index(chr(10) + "}")]
     assert "min-height: 0 !important" in wide
-    assert "repeat(4, minmax(0, 1fr))" in wide, "메트릭은 4열이어야 한다"
+    assert "repeat(2, minmax(0, 1fr))" in wide, "메트릭은 2×2 여야 한다"
 
 
 def test_charts_are_told_to_resize_after_relayout(work):
@@ -473,4 +474,22 @@ def test_camera_height_is_capped_when_widened(work):
     wide = work[work.index("@media (min-width: 1600px)"):]
     wide = wide[:wide.index(chr(10) + "}")]
     assert "aspect-ratio: auto !important" in wide
-    assert "height: 400px !important" in wide
+    assert "height: 330px !important" in wide
+
+
+def test_plotly_sphere_min_height_is_released(work):
+    """#sphereDiv 의 min-height:240px 이 줄인 카드보다 커서 밖으로 흘러나왔다."""
+    wide = work[work.index("@media (min-width: 1600px)"):]
+    wide = wide[:wide.index(chr(10) + "}")]
+    assert "#sphereDiv { min-height: 0 !important; }" in wide
+
+
+def test_metric_cards_clip_overflow(work):
+    wide = work[work.index("@media (min-width: 1600px)"):]
+    wide = wide[:wide.index(chr(10) + "}")]
+    assert "overflow: hidden !important" in wide
+
+
+def test_plotly_is_resized_explicitly(work):
+    """Plotly 는 resize 이벤트만으로 안 따라오는 경우가 있다."""
+    assert "Plotly.Plots.resize" in work
