@@ -86,6 +86,7 @@ NEW_IDS = [
     "pumpEmergencyStop", "pumpResetAcknowledgement", "pumpResetEmergencyStop",
     "pumpStepCount", "pumpStepSpm", "pumpSendSteps", "pumpPositionSteps",
     "spacebioJumpLink", "resistanceModeBadge", "spacebioSubtitle",
+    "spacebioRecordingHint",
 ]
 
 
@@ -253,3 +254,44 @@ def test_jump_link_points_to_the_panel(work):
     header_section = work[work.index("<header>"):work.index("</header>")]
     assert 'href="#spacebioPanel"' in header_section
     assert 'id="spacebioJumpLink"' in header_section
+
+
+# ──────────────── 세션·측정 순서 (2026-07-29 혼동·오류 신고) ────────────────
+#
+# 두 버튼이 대등해 보이지만 하는 일이 다르다. 세션 = 파일 기록 구간,
+# 측정 = 센서 스트림. 세션 없이 측정만 하면 화면에는 보여도 저장이 안 되고,
+# 이미 도는 상태에서 다시 누르면 백엔드가 409를 냈다. 애초에 못 누르게 막는다.
+
+def test_action_buttons_are_state_driven(work):
+    start = work.index("function spacebioSyncActionButtons")
+    section = work[start:work.index(chr(10) + "}", start)]
+    for target in ("spacebioSessionStart", "spacebioSessionFinish",
+                   "resistanceStart", "resistanceStop"):
+        assert target in section, f"{target} 활성 여부를 상태로 정하지 않는다"
+    assert "recording" in section and "running" in section
+
+
+def test_stale_recovery_reapplies_state_driven_disabling(work):
+    """stale 해제 루프가 전부 되살리므로 그 뒤에 다시 입혀야 한다."""
+    start = work.index("function spacebioSetStale")
+    section = work[start:work.index(chr(10) + "}", start)]
+    assert "spacebioSyncActionButtons" in section
+
+
+def test_finish_does_not_send_placeholder_session_id(work):
+    """세션이 없을 때 화면의 '-'를 그대로 보내 422가 나던 것을 막는다."""
+    start = work.index("sbEl('spacebioSessionFinish').onclick")
+    section = work[start:start + 700]
+    assert "'-'" in section and "return" in section
+
+
+def test_measure_start_warns_when_not_recording(work):
+    start = work.index("sbEl('resistanceStart').onclick")
+    section = work[start:start + 700]
+    assert "기록되지 않습니다" in section
+
+
+def test_conflict_errors_are_shown_in_korean(work):
+    start = work.index("async function spacebioFetch")
+    section = work[start:work.index(chr(10) + "}", start)]
+    assert "sensor_conflict" in section and "측정 정지" in section

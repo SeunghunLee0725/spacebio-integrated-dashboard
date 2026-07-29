@@ -1727,6 +1727,9 @@ window.addEventListener('resize', scheduleCameraResize);
 #spacebioPanel .sb-card { background: var(--card); border-radius: var(--radius); padding: 12px; }
 /* 저항 추이 그래프 높이 — 클리노스텟 RPM 그래프와 같은 크기로 맞춘다.
    Chart.js maintainAspectRatio:false 는 컨테이너 높이를 따르므로 여기서 고정한다. */
+/* 세션·측정 관계 안내. 지금 눌러야 할 것과 기록 여부를 한 줄로 알려준다. */
+#spacebioPanel .sb-hint { margin-top: 6px; font-size: 12px; line-height: 1.5; opacity: .85; }
+#spacebioPanel .sb-hint.warn { color: #ffb703; opacity: 1; }
 #spacebioPanel .sb-chart-wrap { position: relative; height: 280px; }
 #spacebioPanel .sb-chart-wrap canvas { width: 100% !important; height: 100% !important; }
 #spacebioPanel .sb-card h3 { margin: 0 0 10px; font-size: 14px; color: var(--text); }
@@ -1770,8 +1773,9 @@ window.addEventListener('resize', scheduleCameraResize);
       <div class="sb-row"><span>경과</span><span id="spacebioSessionElapsed">-</span></div>
       <label for="spacebioExperimentName">실험명</label>
       <input id="spacebioExperimentName" type="text" value="simulation-smoke">
-      <button id="spacebioSessionStart">세션 시작</button>
-      <button id="spacebioSessionFinish">세션 종료</button>
+      <button id="spacebioSessionStart">① 세션 시작 (기록)</button>
+      <button id="spacebioSessionFinish">④ 세션 종료</button>
+      <div class="sb-hint" id="spacebioRecordingHint"></div>
     </div>
 
     <div class="sb-card">
@@ -1779,8 +1783,8 @@ window.addEventListener('resize', scheduleCameraResize);
       <!-- 실기 BLE 센서 전용. CSV 재생·합성 신호·USB 시리얼 모드는 화면에서 제거했다
            (백엔드에는 남아 있어 필요하면 API로 직접 설정할 수 있다). -->
       <div class="sb-row"><span>연결</span><span>BLE 무선 (ResistanceSensor)</span></div>
-      <button id="resistanceStart">측정 시작</button>
-      <button id="resistanceStop">정지</button>
+      <button id="resistanceStart">② 측정 시작</button>
+      <button id="resistanceStop">③ 측정 정지</button>
       <div class="sb-row"><span>저항</span><span id="resistanceValue">-</span></div>
       <div class="sb-row"><span>ΔR/R₀</span><span id="resistanceDelta">-</span></div>
       <div class="sb-row"><span>raw ADC</span><span id="resistanceAdc">-</span></div>
@@ -1841,6 +1845,9 @@ let spacebioBackoffIndex = 0;
 let spacebioLastSeenAt = 0;
 let spacebioLastSequence = null;
 let spacebioSessionStartedAt = null;
+//: 버튼 활성/비활성 판단의 근거. 상태 갱신 때마다 status에서 받아 채운다.
+let spacebioSessionState = 'idle';
+let spacebioSensorState = 'idle';
 let spacebioLastRender = 0;
 let spacebioChart = null;
 
@@ -1861,8 +1868,17 @@ async function spacebioFetch(path, options) {
   const payload = await res.json().catch(() => ({}));
   if (!res.ok) {
     const err = (payload && payload.error) || { code: 'error', message: res.statusText };
-    sbEl('spacebioGatewayError').textContent = err.code + ': ' + err.message;
-    spacebioLog('오류 ' + res.status + ' — ' + err.code);
+    // 백엔드 메시지는 영어 원문이라 현장에서 읽기 어렵다. 자주 나오는 충돌은
+    // 무엇을 해야 하는지까지 한국어로 알려준다.
+    const friendly = {
+      sensor_conflict: '측정이 이미 실행 중입니다. ③ 측정 정지를 먼저 누르세요.',
+      conflict: '세션이 이미 열려 있습니다. ④ 세션 종료를 먼저 누르세요.',
+      validation_error: '요청 값이 올바르지 않습니다. 세션이 열려 있는지 확인하세요.',
+      pump_offline: '펌프 보드가 브로커에 연결돼 있지 않습니다.',
+      gateway_unreachable: 'Gateway 응답이 없습니다. 잠시 후 다시 시도하세요.',
+    }[err.code];
+    sbEl('spacebioGatewayError').textContent = friendly || (err.code + ': ' + err.message);
+    spacebioLog('오류 ' + res.status + ' — ' + (friendly || err.code));
     throw new Error(err.code);
   }
   sbEl('spacebioGatewayError').textContent = '';
@@ -1881,6 +1897,9 @@ function spacebioSetStale(isStale) {
   });
   if (isStale) {
     sbEl('spacebioGatewayState').textContent = 'degraded (응답 없음)';
+  } else {
+    // 위 루프가 전부 되살렸으므로, 상태에 맞는 비활성화를 다시 입힌다.
+    spacebioSyncActionButtons();
   }
   spacebioSyncResetButton();
 }
@@ -1889,6 +1908,40 @@ function spacebioSyncResetButton() {
   const typed = sbEl('pumpResetAcknowledgement').value;
   const button = sbEl('pumpResetEmergencyStop');
   button.disabled = typed !== SPACEBIO_ESTOP_ACK;
+}
+
+// ── 세션과 측정의 관계를 UI가 강제한다 ────────────────────────────────
+//
+// 둘은 대등해 보이지만 하는 일이 다르다:
+//   세션 = 데이터를 파일로 **기록**하는 구간
+//   측정 = 센서 스트림을 **받는** 동작
+// 기록하려면 세션이 먼저 열려 있어야 한다. 세션 없이 측정만 하면 화면에는
+// 보이지만 저장은 안 된다 — 예전엔 그 사실이 어디에도 드러나지 않았다.
+// 또 이미 도는 상태에서 시작을 다시 누르면 백엔드가 409를 냈는데, 애초에
+// 누를 수 없게 막는 편이 낫다.
+function spacebioSyncActionButtons() {
+  const recording = spacebioSessionState === 'recording';
+  const measuring = spacebioSensorState === 'running';
+
+  sbEl('spacebioSessionStart').disabled = recording;
+  sbEl('spacebioSessionFinish').disabled = !recording;
+  sbEl('resistanceStart').disabled = measuring;
+  sbEl('resistanceStop').disabled = !measuring;
+
+  const hint = sbEl('spacebioRecordingHint');
+  hint.classList.remove('warn');
+  if (!recording && !measuring) {
+    hint.textContent = '① 세션 시작 → ② 측정 시작 순서로 누르세요. '
+      + '세션이 열려 있어야 데이터가 파일로 기록됩니다.';
+  } else if (!recording && measuring) {
+    hint.textContent = '⚠ 세션이 없어 화면에만 표시되고 기록되지 않습니다. '
+      + '기록하려면 측정을 정지하고 세션을 먼저 시작하세요.';
+    hint.classList.add('warn');
+  } else if (recording && !measuring) {
+    hint.textContent = '세션이 열렸습니다. ② 측정 시작을 누르면 기록이 시작됩니다.';
+  } else {
+    hint.textContent = '기록 중입니다. 끝내려면 ③ 측정 정지 → ④ 세션 종료.';
+  }
 }
 
 async function spacebioResetEstop() {
@@ -1919,6 +1972,9 @@ function spacebioRenderStatus(status) {
   const session = status.session || {};
   sbEl('spacebioSessionId').textContent = session.session_id || '-';
   sbEl('spacebioSessionRecordingState').textContent = session.state || 'idle';
+  spacebioSessionState = session.state || 'idle';
+  spacebioSensorState = (status.sensor || {}).state || 'idle';
+  spacebioSyncActionButtons();
   if (session.state === 'recording' && !spacebioSessionStartedAt) {
     spacebioSessionStartedAt = Date.now();
     sbEl('spacebioSessionStartedAt').textContent = new Date().toLocaleTimeString();
@@ -2025,7 +2081,10 @@ async function spacebioInit() {
   sbEl('resistanceStart').onclick = async () => {
     await spacebioConfigureSensor();
     await spacebioFetch('/api/spacebio/sensor/start', { method: 'POST', body: {} });
-    spacebioLog('센서 측정 시작');
+    // 세션 없이 측정하면 화면에만 보이고 파일에는 안 남는다 — 조용히 넘기지 않는다.
+    spacebioLog(spacebioSessionState === 'recording'
+      ? '센서 측정 시작 (기록 중)'
+      : '센서 측정 시작 — ⚠ 세션이 없어 기록되지 않습니다');
   };
   sbEl('resistanceStop').onclick = async () => {
     await spacebioFetch('/api/spacebio/sensor/stop', { method: 'POST', body: {} });
@@ -2063,7 +2122,12 @@ async function spacebioInit() {
     spacebioLog('세션 시작: ' + sid);
   };
   sbEl('spacebioSessionFinish').onclick = async () => {
+    // 화면 텍스트를 그대로 보내면 세션이 없을 때 '-'가 전송돼 422가 났다.
     const current = sbEl('spacebioSessionId').textContent;
+    if (spacebioSessionState !== 'recording' || !current || current === '-') {
+      spacebioLog('종료할 세션이 없습니다');
+      return;
+    }
     await spacebioFetch('/api/spacebio/session/finish', { method: 'POST', body: {
       session_id: current, finished_at: new Date().toISOString(),
       clinostat_run_id: null } });
