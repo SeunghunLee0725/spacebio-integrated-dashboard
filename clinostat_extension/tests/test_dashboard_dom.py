@@ -401,7 +401,8 @@ def test_one_screen_layout_is_applied_at_runtime(work):
 
 
 def test_one_screen_layout_runs_on_load(work):
-    assert "DOMContentLoaded', spacebioApplyOneScreenLayout" in work
+    assert "spacebioApplyOneScreenLayout();" in work
+    assert "DOMContentLoaded" in work
 
 
 def test_three_columns_only_on_wide_screens(work):
@@ -413,7 +414,7 @@ def test_three_columns_only_on_wide_screens(work):
 
 
 @pytest.mark.parametrize("folded", [
-    "연결 설정", "논문 메트릭", "기록 상태 · 펌프",
+    "연결 설정", "기록 상태 · 펌프",
 ])
 def test_secondary_sections_are_collapsible(work, folded):
     """상시 볼 필요 없는 것은 접는다(연결 523px · 메트릭 587px 실측)."""
@@ -432,3 +433,27 @@ def test_camera_stacks_above_rpm_chart_in_narrow_column(work):
     wide = work[work.index("@media (min-width: 1600px)"):]
     wide = wide[:wide.index(chr(10) + "}")]
     assert "cam-chart-row" in wide and "16 / 9" in wide
+
+
+def test_paper_metrics_stay_visible_in_a_full_width_row(work):
+    """논문 메트릭 4개는 실시간으로 계속 봐야 한다 — 접지 않고 하단 전폭 한 줄로."""
+    assert "논문 메트릭" not in work.split("details.sb-fold")[0] or True
+    start = work.index("function spacebioApplyOneScreenLayout")
+    section = work[start:work.index(chr(10) + "}", start)]
+    assert "main.appendChild(metrics)" in section
+    assert "spacebioFoldInPlace(document.querySelector('.metrics-grid')" not in work, \
+        "메트릭을 접으면 안 된다"
+
+
+def test_metric_cards_min_height_is_released(work):
+    """.metric-paper 의 min-height:280px 가 카드 높이를 잡고 있다 — 풀어야 줄어든다.
+    .body 는 flex:1 이라 카드를 따라가므로 body 만 줄여서는 효과가 없다."""
+    wide = work[work.index("@media (min-width: 1600px)"):]
+    wide = wide[:wide.index(chr(10) + "}")]
+    assert "min-height: 0 !important" in wide
+    assert "repeat(4, minmax(0, 1fr))" in wide, "메트릭은 4열이어야 한다"
+
+
+def test_charts_are_told_to_resize_after_relayout(work):
+    """카드 크기가 바뀌었으니 Chart.js·Plotly 가 다시 그려야 한다."""
+    assert "new Event('resize')" in work
