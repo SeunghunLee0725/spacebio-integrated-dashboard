@@ -119,12 +119,37 @@ python -m gateway.main                    # 게이트웨이 구동 (시뮬 센�
 mosquitto_sub -t 's25007/#' -v
 ```
 
-## 현재 상태 (S0)
-- 시뮬레이션 센서 소스로 전체 파이프라인(브리지·저장·폐루프) 구동 가능.
-- 실제 하드웨어(BLE 센서·펌프)는 config에서 `bleak`/`serial` 백엔드로 교체 예정(S1·S4).
+## 현재 상태 (2026-07-29, 브랜치 `feature/spacebio-integrated-dashboard`)
+
+실기에서 도는 것:
+- **BLE 저항센서** — 실측 36 Hz, `sensor_publish_hz: 50`으로 폴링을 맞췄다.
+  레퍼런스 저항 Rref·시간평균 계수 N을 화면에서 장치에 써 넣는다.
+- **통합 세션 기록** — 실험명 + 측정 시작이면 세션이 자동으로 열리고, 측정 정지에
+  닫힌다. `<data_root>/sessions/<session_id>/{manifest.json, sensor_samples.csv,
+  pump_events.jsonl}`.
+- **기록 관리** — 화면에서 세션 목록·`.tar.gz` 다운로드·삭제. 자세한 계약은 [DEPLOY.md](DEPLOY.md).
+- **한 화면 배치** — 2560×1440 기준 런타임 3열 재배치(1600px 미만이면 원래 세로 배치).
+
+아직 아닌 것:
+- **무선 펌프 모터가 돌지 않는다.** 펌웨어·무선·STEP 펄스·GPIO는 전부 정상으로
+  확인했고(90,000+ 펄스, VMOT 16 V, 코일 여자됨), 남은 구간은 드라이버 출력~모터
+  전기 경로다. 멀티미터로 XIAO D9 패드↔드라이버 STEP 핀 도통을 봐야 한다.
 - 유로 방식(밸브/볼루스/수동)은 미정 → `pump_actuator`가 소스-불문 API로 흡수. (DEC-009)
+
+## 배포
+
+새 기계에서 처음부터 올리는 절차, 파이 디렉터리 배치, systemd, BLE·방화벽 주의,
+기록 관리 API, 저장 용량 계산은 **[DEPLOY.md](DEPLOY.md)** 에 있다.
+
+```bash
+PI_HOST=<주소> PI_USER=<사용자> bash deploy/deploy_to_pi.sh
+```
 
 ## 테스트
 ```bash
-cd integration && python -m pytest tests/ -q
+cd integration && .venv/bin/python -m pytest -q      # 537개
 ```
+
+`tests/`는 게이트웨이, `clinostat_extension/tests/`는 프록시와 화면 계약을 본다.
+후자에는 **append-only 가드**가 있다 — 캡처된 베이스라인 HTML의 줄을 고치거나
+지우면 `test_work_copies_are_a_superset_of_the_captured_baseline`가 깨진다.
