@@ -62,7 +62,7 @@ from gateway.session_store import (
 from gateway.runtime_config import GatewayConfig, load_config
 from gateway.mqtt_pump import MqttPump
 from gateway.mqtt_pump import PumpConflictError as MqttPumpConflictError
-from gateway.ble_sensor import BleSensorSource
+from gateway.ble_sensor import BleSensorSource, BleTarget
 from gateway.sensor_source import SensorSourceError
 from gateway.serial_sensor import SerialSensorSource
 from gateway.simulated_pump import FileEstopLatchPersistence, SimulatedPump
@@ -269,7 +269,10 @@ class GatewayRuntime:
                 mode = SensorMode.SERIAL_LIVE
             elif isinstance(request, SensorConfigureBleLiveRequest):
                 source = BleSensorSource(
-                    device_name=request.device_name or self._config.ble_device_name,
+                    target=BleTarget(
+                        address=request.address or self._config.ble_address,
+                        name=request.device_name or self._config.ble_device_name,
+                    ),
                     scan_timeout_s=request.scan_timeout_s,
                 )
                 mode = SensorMode.BLE_LIVE

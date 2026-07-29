@@ -183,11 +183,15 @@ class SensorConfigureSerialLiveRequest(_Request):
 class SensorConfigureBleLiveRequest(_Request):
     """실기 센서 BLE 직결 설정.
 
-    `device_name`을 비우면 config.yaml의 `ble.device_name`을 쓴다 — 보드를
-    바꿔 끼울 때만 요청에서 덮어쓴다.
+    기본 탐색은 **서비스 UUID**로 한다 — 이 센서는 광고에 Local Name을 넣지 않아
+    이름으로는 찾을 수 없다(2026-07-29 실기 확인). 센서를 여러 대 붙일 때만
+    `address`로 특정한다. 비우면 config.yaml의 `ble.*` 값을 쓴다.
     """
 
     mode: Literal[SensorMode.BLE_LIVE] = SensorMode.BLE_LIVE
+    #: BLE MAC (예: "2D:62:81:2C:26:C2"). 지정하면 UUID 탐색보다 우선한다.
+    address: Optional[Annotated[str, Field(pattern=r"^(?:[0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$")]] = None
+    #: 보조 필터 — 같은 서비스를 광고하는 장치가 여럿일 때만 의미가 있다.
     device_name: Optional[Annotated[str, Field(min_length=1, max_length=64)]] = None
     scan_timeout_s: Annotated[float, Field(gt=0.0, le=120.0)] = 15.0
 

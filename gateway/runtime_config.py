@@ -44,8 +44,11 @@ class GatewayConfig:
     #: ttyACM0을 차지한 적이 있다). `/dev/serial/by-id/...` 고정 경로를 권장한다.
     sensor_serial_port: str = "/dev/ttyACM0"
     sensor_serial_baudrate: int = 115200
-    #: 실기 저항센서(BLE_LIVE)가 광고하는 이름. 요청에서 비우면 이 값을 쓴다.
-    ble_device_name: str = "ResistanceSensor"
+    #: 실기 저항센서(BLE_LIVE) 탐색값. 기본은 서비스 UUID로 찾고, 이름은 보조 필터다
+    #: — 이 센서는 광고에 Local Name을 넣지 않는다(2026-07-29 실기 확인).
+    #: 센서를 여러 대 붙일 때만 `ble.address`로 특정한다.
+    ble_device_name: Optional[str] = None
+    ble_address: Optional[str] = None
     data_root: Path = Path("/home/aiworker-1/spacebio-data")
     flush_interval_s: float = 1.0
     flush_record_count: int = 100
@@ -90,7 +93,8 @@ def load_config(path: Path) -> GatewayConfig:
         mqtt_password=mqtt.get("password"),
         sensor_serial_port=str(sensor.get("serial_port", "/dev/ttyACM0")),
         sensor_serial_baudrate=int(sensor.get("serial_baudrate", 115200)),
-        ble_device_name=str(ble.get("device_name", "ResistanceSensor")),
+        ble_device_name=ble.get("device_name") or None,
+        ble_address=ble.get("address") or None,
         data_root=Path(store.get("data_root", "/home/aiworker-1/spacebio-data")),
         flush_interval_s=float(store.get("flush_interval_s", 1.0)),
         flush_record_count=int(store.get("flush_record_count", 100)),

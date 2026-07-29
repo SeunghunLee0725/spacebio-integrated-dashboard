@@ -24,6 +24,7 @@ import asyncio
 import contextlib
 import logging
 from collections import deque
+from dataclasses import dataclass
 from typing import Any, AsyncIterator, Callable, Optional, Protocol
 
 from gateway.api_models import SensorSample
@@ -31,6 +32,10 @@ from gateway.ble_packet import BlePacketError, parse_sensor_packet
 from gateway.sensor_source import SensorSourceError
 
 logger = logging.getLogger("gateway.ble_sensor")
+
+#: Arduino 펌웨어(`ble_service.h`)가 광고하는 커스텀 서비스. 데이터 특성은 ...AC.
+SERVICE_UUID = "12345678-1234-1234-1234-1234567890ab"
+SENSOR_DATA_UUID = "12345678-1234-1234-1234-1234567890ac"
 
 DEFAULT_DEVICE_NAME = "ResistanceSensor"
 DEFAULT_SCAN_TIMEOUT_S = 15.0
@@ -40,10 +45,33 @@ DEFAULT_SCAN_TIMEOUT_S = 15.0
 MAX_BUFFERED_SAMPLES = 2048
 
 
+@dataclass(frozen=True)
+class BleTarget:
+    """어떤 장치에 붙을지. 우선순위는 address → service_uuid → name.
+
+    ⚠ **이름으로 찾지 않는 것이 기본이다.** 2026-07-29 실기 확인 결과 이 센서는
+    광고에 Local Name 을 넣지 않는다(MAC 만 보인다). 이름 기반 탐색
+    (`find_device_by_name`)은 그래서 영원히 실패한다. 서비스 UUID 는 펌웨어가
+    실제로 광고하는 계약이므로 이쪽이 맞다. 이름은 보조 필터로만 쓴다.
+    """
+
+    service_uuid: str = SERVICE_UUID
+    address: Optional[str] = None
+    name: Optional[str] = None
+
+    def describe(self) -> str:
+        if self.address:
+            return f"address={self.address}"
+        parts = [f"service={self.service_uuid}"]
+        if self.name:
+            parts.append(f"name={self.name!r}")
+        return " ".join(parts)
+
+
 class BleClient(Protocol):
     """BLE 연결 대상. 테스트는 이 인터페이스를 구현한 가짜를 주입한다."""
 
-    async def connect(self, device_name: str, timeout: float) -> bool: ...
+    async def connect(self, target: BleTarget, timeout: float) -> bool: ...
 
     def stream(self) -> AsyncIterator[bytes]: ...
 
@@ -56,12 +84,12 @@ class BleSensorSource:
     def __init__(
         self,
         *,
-        device_name: str = DEFAULT_DEVICE_NAME,
+        target: Optional[BleTarget] = None,
         scan_timeout_s: float = DEFAULT_SCAN_TIMEOUT_S,
         client_factory: Optional[Callable[[], BleClient]] = None,
         max_buffered: int = MAX_BUFFERED_SAMPLES,
     ) -> None:
-        self._device_name = device_name
+        self._target = target or BleTarget()
         self._scan_timeout_s = scan_timeout_s
         self._client_factory = client_factory
         self._buffer: deque[SensorSample] = deque(maxlen=max_buffered)
@@ -116,15 +144,15 @@ class BleSensorSource:
         try:
             client = self._make_client()
             self._client = client
-            connected = await client.connect(self._device_name, self._scan_timeout_s)
+            connected = await client.connect(self._target, self._scan_timeout_s)
             if not connected:
                 self._error = (
-                    f"BLE device {self._device_name!r} not found "
-                    f"(scanned {self._scan_timeout_s:.0f}s) — 전원과 광고 상태를 확인하세요"
+                    f"BLE device not found ({self._target.describe()}, "
+                    f"scanned {self._scan_timeout_s:.0f}s) — 전원과 광고 상태를 확인하세요"
                 )
                 logger.warning("%s", self._error)
                 return
-            logger.info("BLE 센서 %r 연결됨", self._device_name)
+            logger.info("BLE 센서 연결됨 (%s)", self._target.describe())
             async for payload in client.stream():
                 sample = self._to_sample(payload)
                 if sample is not None:
@@ -178,32 +206,58 @@ class BleSensorSource:
 
 
 class _BleakClientAdapter:
-    """실제 bleak 백엔드. `BleClient` 프로토콜에 맞춘 얇은 어댑터.
-
-    UUID 는 Arduino 펌웨어(`ble_service.h`)와 `ble_receiver/ble_client.py` 가
-    공유하는 값이다.
-    """
-
-    SERVICE_UUID = "12345678-1234-1234-1234-1234567890AB"
-    SENSOR_DATA_UUID = "12345678-1234-1234-1234-1234567890AC"
+    """실제 bleak 백엔드. `BleClient` 프로토콜에 맞춘 얇은 어댑터."""
 
     def __init__(self) -> None:
         self._client: Any = None
+        self._data_uuid = SENSOR_DATA_UUID
         self._queue: asyncio.Queue[bytes] = asyncio.Queue()
 
-    async def connect(self, device_name: str, timeout: float) -> bool:
+    async def connect(self, target: BleTarget, timeout: float) -> bool:
         try:
             from bleak import BleakClient, BleakScanner
         except ImportError as exc:  # pragma: no cover — 배포 환경 문제
             raise SensorSourceError("bleak is required for BLE_LIVE mode") from exc
 
-        device = await BleakScanner.find_device_by_name(device_name, timeout=timeout)
+        device = await self._discover(BleakScanner, target, timeout)
         if device is None:
             return False
         self._client = BleakClient(device)
         await self._client.connect()
-        await self._client.start_notify(self.SENSOR_DATA_UUID, self._on_notify)
+        await self._client.start_notify(self._data_uuid, self._on_notify)
         return True
+
+    @staticmethod
+    async def _discover(scanner: Any, target: BleTarget, timeout: float) -> Any:
+        """address → service UUID 순으로 찾는다. 이름은 동점일 때의 선호도일 뿐.
+
+        이름 기반 탐색을 쓰지 않는 이유는 `BleTarget` 주석 참고 — 이 센서는
+        광고에 Local Name 을 넣지 않는다.
+        """
+        if target.address:
+            return await scanner.find_device_by_address(target.address, timeout=timeout)
+
+        wanted = target.service_uuid.lower()
+        found = await scanner.discover(timeout=timeout, return_adv=True)
+        matches = [
+            (device, adv)
+            for device, adv in found.values()
+            if wanted in {u.lower() for u in (adv.service_uuids or [])}
+        ]
+        if not matches:
+            return None
+        if target.name:
+            for device, adv in matches:
+                if (adv.local_name or device.name) == target.name:
+                    return device
+        if len(matches) > 1:
+            logger.warning(
+                "서비스 %s 를 광고하는 장치가 %d개 — 첫 번째를 쓴다. "
+                "구분이 필요하면 ble.address 를 지정하세요: %s",
+                target.service_uuid, len(matches),
+                ", ".join(d.address for d, _ in matches),
+            )
+        return matches[0][0]
 
     def _on_notify(self, _characteristic: Any, data: bytearray) -> None:
         self._queue.put_nowait(bytes(data))
@@ -217,6 +271,6 @@ class _BleakClientAdapter:
             return
         client, self._client = self._client, None
         with contextlib.suppress(Exception):
-            await client.stop_notify(self.SENSOR_DATA_UUID)
+            await client.stop_notify(self._data_uuid)
         with contextlib.suppress(Exception):
             await client.disconnect()

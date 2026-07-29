@@ -13,7 +13,7 @@ from gateway.ble_packet import (
     BlePacketError,
     parse_sensor_packet,
 )
-from gateway.ble_sensor import BleSensorSource
+from gateway.ble_sensor import BleSensorSource, BleTarget, _BleakClientAdapter
 from gateway.sensor_source import SensorSourceError
 
 
@@ -86,10 +86,10 @@ class FakeBleClient:
         self._fail_connect = fail_connect
         self.connected = False
         self.disconnect_calls = 0
-        self.device_name = None
+        self.target = None
 
-    async def connect(self, device_name: str, timeout: float) -> bool:
-        self.device_name = device_name
+    async def connect(self, target: BleTarget, timeout: float) -> bool:
+        self.target = target
         if self._fail_connect:
             return False
         self.connected = True
@@ -127,7 +127,7 @@ async def test_source_yields_samples_and_rebases_elapsed():
         _packet(timestamp_ms=1_000, resistance_ohm=253_000.0),
         _packet(timestamp_ms=1_500, resistance_ohm=252_000.0),
     ])
-    src = BleSensorSource(device_name="ResistanceSensor", client_factory=lambda: client)
+    src = BleSensorSource(target=BleTarget(name="ResistanceSensor"), client_factory=lambda: client)
     src.start()
     samples = await _drain(src, 2)
     await src.aclose()
@@ -144,7 +144,7 @@ async def test_source_yields_samples_and_rebases_elapsed():
 async def test_tick_returns_one_sample_per_call():
     """한 번에 최신까지 비우면 세션 로그에서 중간 샘플이 유실된다."""
     client = FakeBleClient([_packet(timestamp_ms=t) for t in (10, 20, 30)])
-    src = BleSensorSource(device_name="X", client_factory=lambda: client)
+    src = BleSensorSource(target=BleTarget(name="X"), client_factory=lambda: client)
     src.start()
     await asyncio.sleep(0.05)
     first = src.tick()
@@ -158,7 +158,7 @@ async def test_tick_returns_one_sample_per_call():
 
 @pytest.mark.asyncio
 async def test_tick_returns_none_before_any_packet():
-    src = BleSensorSource(device_name="X", client_factory=lambda: FakeBleClient([]))
+    src = BleSensorSource(target=BleTarget(name="X"), client_factory=lambda: FakeBleClient([]))
     assert src.tick() is None                          # start() 전
     src.start()
     assert src.tick() is None                          # 아직 수신 없음
@@ -169,7 +169,7 @@ async def test_tick_returns_none_before_any_packet():
 async def test_malformed_packet_is_dropped_not_fatal():
     """길이가 틀린 패킷 하나 때문에 스트림 전체가 끊기면 안 된다."""
     client = FakeBleClient([b"\x00" * 5, _packet(timestamp_ms=99)])
-    src = BleSensorSource(device_name="X", client_factory=lambda: client)
+    src = BleSensorSource(target=BleTarget(name="X"), client_factory=lambda: client)
     src.start()
     samples = await _drain(src, 1)
     await src.aclose()
@@ -182,7 +182,7 @@ async def test_malformed_packet_is_dropped_not_fatal():
 async def test_connect_failure_is_reported_through_tick():
     """스캔 실패는 조용히 넘기지 않는다 — 운영자가 알아야 한다."""
     src = BleSensorSource(
-        device_name="Missing",
+        target=BleTarget(name="Missing"),
         client_factory=lambda: FakeBleClient([], fail_connect=True),
     )
     src.start()
@@ -195,7 +195,7 @@ async def test_connect_failure_is_reported_through_tick():
 @pytest.mark.asyncio
 async def test_aclose_disconnects_client():
     client = FakeBleClient([_packet()])
-    src = BleSensorSource(device_name="X", client_factory=lambda: client)
+    src = BleSensorSource(target=BleTarget(name="X"), client_factory=lambda: client)
     src.start()
     await asyncio.sleep(0.05)
     await src.aclose()
@@ -206,9 +206,94 @@ async def test_aclose_disconnects_client():
 @pytest.mark.asyncio
 async def test_start_is_idempotent_and_restarts_cleanly():
     client = FakeBleClient([_packet(timestamp_ms=7)])
-    src = BleSensorSource(device_name="X", client_factory=lambda: client)
+    src = BleSensorSource(target=BleTarget(name="X"), client_factory=lambda: client)
     src.start()
     src.start()                                        # 두 번 불러도 태스크는 하나
     samples = await _drain(src, 1)
     await src.aclose()
     assert len(samples) == 1
+
+
+# ─────────────────────────── 장치 탐색 (실기 결함 대응) ───────────────────────────
+#
+# 2026-07-29 실기 확인: 이 센서는 광고에 Local Name 을 넣지 않는다. MAC 만 보이고
+# 커스텀 서비스 UUID 만 광고한다. 이름 기반 탐색은 그래서 영원히 실패한다.
+
+from gateway.ble_sensor import SERVICE_UUID
+
+
+class _Dev:
+    def __init__(self, address, name=None):
+        self.address = address
+        self.name = name
+
+
+class _Adv:
+    def __init__(self, service_uuids, local_name=None):
+        self.service_uuids = service_uuids
+        self.local_name = local_name
+
+
+class FakeScanner:
+    """bleak.BleakScanner 의 discover/find_device_by_address 만 흉내낸다."""
+
+    def __init__(self, found):
+        self._found = found
+        self.by_address_calls = []
+
+    async def discover(self, timeout=None, return_adv=False):
+        return self._found
+
+    async def find_device_by_address(self, address, timeout=None):
+        self.by_address_calls.append(address)
+        for dev, _adv in self._found.values():
+            if dev.address == address:
+                return dev
+        return None
+
+
+@pytest.mark.asyncio
+async def test_discovery_finds_device_by_service_uuid_without_name():
+    """이름이 없어도 서비스 UUID 로 찾아야 한다 — 이게 실기 실패의 핵심이었다."""
+    dev = _Dev("2D:62:81:2C:26:C2")
+    scanner = FakeScanner({dev.address: (dev, _Adv([SERVICE_UUID]))})
+    found = await _BleakClientAdapter._discover(scanner, BleTarget(), 5.0)
+    assert found is dev
+
+
+@pytest.mark.asyncio
+async def test_discovery_ignores_devices_without_our_service():
+    other = _Dev("AA:BB:CC:DD:EE:FF", name="누군가의 폰")
+    scanner = FakeScanner({other.address: (other, _Adv(["0000fd69-0000-1000-8000-00805f9b34fb"]))})
+    assert await _BleakClientAdapter._discover(scanner, BleTarget(), 5.0) is None
+
+
+@pytest.mark.asyncio
+async def test_discovery_matches_uuid_case_insensitively():
+    """펌웨어는 대문자, bleak 는 소문자로 준다 — 대소문자로 놓치면 안 된다."""
+    dev = _Dev("2D:62:81:2C:26:C2")
+    scanner = FakeScanner({dev.address: (dev, _Adv([SERVICE_UUID.upper()]))})
+    assert await _BleakClientAdapter._discover(scanner, BleTarget(), 5.0) is dev
+
+
+@pytest.mark.asyncio
+async def test_discovery_prefers_named_device_when_several_match():
+    a, b = _Dev("11:11:11:11:11:11"), _Dev("22:22:22:22:22:22")
+    scanner = FakeScanner({
+        a.address: (a, _Adv([SERVICE_UUID], local_name="다른센서")),
+        b.address: (b, _Adv([SERVICE_UUID], local_name="ResistanceSensor")),
+    })
+    found = await _BleakClientAdapter._discover(
+        scanner, BleTarget(name="ResistanceSensor"), 5.0)
+    assert found is b
+
+
+@pytest.mark.asyncio
+async def test_discovery_uses_address_when_given():
+    """address 가 있으면 스캔보다 우선한다 — 센서를 여러 대 붙일 때의 확정 경로."""
+    dev = _Dev("2D:62:81:2C:26:C2")
+    scanner = FakeScanner({dev.address: (dev, _Adv([]))})   # UUID 광고가 없어도
+    found = await _BleakClientAdapter._discover(
+        scanner, BleTarget(address="2D:62:81:2C:26:C2"), 5.0)
+    assert found is dev
+    assert scanner.by_address_calls == ["2D:62:81:2C:26:C2"]
