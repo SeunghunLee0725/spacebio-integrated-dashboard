@@ -357,3 +357,30 @@ def test_panel_reflects_server_applied_settings(work):
     """화면이 자기가 보낸 값을 되뇌지 않고 서버가 쓰는 값을 보여줘야 한다."""
     assert "sensorStatus.rref_ohm" in work
     assert "sensorStatus.avg_factor" in work
+
+
+# ───── 측정 정지 시 차트도 멈춘다 (2026-07-29 신고) ─────
+#
+# 정지해도 마지막 샘플이 status 에 남아 있어, 상태 메시지가 올 때마다 같은 점을
+# 계속 찍으며 선이 옆으로 늘어났다. 정지하면 그래프도 멈춰야 한다.
+
+def test_chart_only_grows_while_measuring(work):
+    start = work.index("function spacebioPushPoint")
+    section = work[start:work.index(chr(10) + "}", start)]
+    assert "running" in section, "센서가 도는 동안에만 점을 추가해야 한다"
+
+
+def test_chart_does_not_replot_the_same_sample(work):
+    """상태 스트림(10Hz)이 같은 샘플을 여러 번 전해도 한 번만 찍어야 한다.
+    평균 N을 올리면 기록이 7.8Hz 라 중복이 더 잦아진다 — 중복을 찍으면 x축이 뭉갠다."""
+    start = work.index("function spacebioPushPoint")
+    section = work[start:work.index(chr(10) + "}", start)]
+    assert "spacebioLastPlottedTs" in section
+    assert "source_timestamp_ms" in section
+
+
+def test_chart_resets_when_a_new_measurement_starts(work):
+    """새 측정은 빈 그래프에서 시작해야 이전 구간과 섞이지 않는다."""
+    start = work.index("sbEl('resistanceStart').onclick")
+    section = work[start:start + 900]
+    assert "spacebioResetChart" in section

@@ -1863,6 +1863,8 @@ let spacebioSessionStartedAt = null;
 //: 버튼 활성/비활성 판단의 근거. 상태 갱신 때마다 status에서 받아 채운다.
 let spacebioSessionState = 'idle';
 let spacebioSensorState = 'idle';
+//: 마지막으로 차트에 찍은 보드 타임스탬프. 같은 샘플을 두 번 찍지 않기 위한 것.
+let spacebioLastPlottedTs = null;
 let spacebioLastRender = 0;
 let spacebioChart = null;
 
@@ -2095,8 +2097,24 @@ function spacebioRenderStatus(status) {
   }
 }
 
+function spacebioResetChart() {
+  if (!spacebioChart) return;
+  spacebioChart.data.labels.length = 0;
+  spacebioChart.data.datasets[0].data.length = 0;
+  spacebioLastPlottedTs = null;
+  spacebioChart.update('none');
+}
+
 function spacebioPushPoint(sample) {
   if (!spacebioChart) return;
+  // 정지 후에도 마지막 샘플은 status 에 남는다. 상태가 올 때마다 그대로 찍으면
+  // 같은 점이 계속 쌓여 선이 옆으로 늘어난다 — 도는 동안에만 그린다.
+  if (spacebioSensorState !== 'running') return;
+  // 상태 스트림(10Hz)이 같은 샘플을 여러 번 전할 수 있다. 특히 평균 N을 올리면
+  // 기록이 7.8Hz 라 중복이 잦다. 보드 타임스탬프로 새 샘플만 받는다.
+  if (sample.source_timestamp_ms === spacebioLastPlottedTs) return;
+  spacebioLastPlottedTs = sample.source_timestamp_ms;
+
   const now = Date.now();
   const data = spacebioChart.data;
   data.labels.push((sample.session_elapsed_ms / 1000).toFixed(1));
@@ -2159,6 +2177,8 @@ async function spacebioInit() {
     }
     await spacebioConfigureSensor();
     await spacebioFetch('/api/spacebio/sensor/start', { method: 'POST', body: {} });
+    // 새 측정은 빈 그래프에서 시작한다 — 이전 구간과 섞이면 x축이 뒤엉킨다.
+    spacebioResetChart();
     spacebioLog('측정 시작 — 기록 중');
   };
   // 측정 정지 = 센서 정지 + 세션 닫기. 세션을 열어둔 채 두면 다음 측정이
