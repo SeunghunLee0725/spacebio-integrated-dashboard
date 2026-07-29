@@ -39,6 +39,13 @@ bash deploy/setup.sh          # venv + 잠긴 의존성
 다른 조합이면 `setup.sh`가 **거부한다**. 잠금 없이 설치하면 실기에서만 터지는
 버전 차이가 생기기 때문이다. 새 조합을 쓰려면 잠금 파일을 먼저 만들어라.
 
+기계의 기본 `python3`가 위 표와 다를 수 있다(macOS 기본이 3.13인 반면 잠금은
+3.14뿐인 식). 그럴 땐 인터프리터를 지정한다.
+
+```bash
+PYTHON=python3.14 bash deploy/setup.sh
+```
+
 ```bash
 .venv/bin/python -m pytest -q      # 537개가 통과해야 한다
 ```

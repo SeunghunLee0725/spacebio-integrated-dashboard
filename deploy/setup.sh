@@ -13,7 +13,11 @@ WITH_MQTT="${SPACEBIO_WITH_MQTT:-0}"
 
 PLATFORM_OS="$(uname -s)"
 PLATFORM_ARCH="$(uname -m)"
-PYTHON_MINOR="$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
+# 기본 python3 가 잠금 파일과 안 맞는 기계가 있다(macOS 기본이 3.13인데 잠금은
+# 3.14뿐인 식). 그럴 때 PYTHON=python3.14 처럼 인터프리터를 지정한다.
+PYTHON="${PYTHON:-python3}"
+command -v "$PYTHON" >/dev/null || { echo "ERROR: $PYTHON 을 찾을 수 없다" >&2; exit 2; }
+PYTHON_MINOR="$("$PYTHON" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
 case "$PLATFORM_OS:$PLATFORM_ARCH:$PYTHON_MINOR" in
   Darwin:arm64:3.14)
     CONSTRAINTS="$HERE/constraints-macos-arm64-py314-dev.txt"
@@ -27,6 +31,8 @@ case "$PLATFORM_OS:$PLATFORM_ARCH:$PYTHON_MINOR" in
     ;;
   *)
     echo "ERROR: no verified dependency lock for $PLATFORM_OS/$PLATFORM_ARCH Python $PYTHON_MINOR" >&2
+    echo "  다른 인터프리터가 있으면 지정해라: PYTHON=python3.14 bash deploy/setup.sh" >&2
+    echo "  검증된 조합: macOS arm64 3.14 / Linux aarch64 3.13 / Linux aarch64 3.11" >&2
     exit 2
     ;;
 esac
@@ -50,7 +56,7 @@ if [[ "$PLATFORM_OS" == "Linux" ]]; then
 fi
 
 echo "==> Python 가상환경 + 의존성"
-python3 -m venv "$HERE/.venv"
+"$PYTHON" -m venv "$HERE/.venv"
 # shellcheck disable=SC1091
 source "$HERE/.venv/bin/activate"
 pip install --upgrade pip
