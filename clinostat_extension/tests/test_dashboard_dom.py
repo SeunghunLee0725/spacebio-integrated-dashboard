@@ -572,3 +572,26 @@ def test_archive_encodes_the_session_id_in_urls(work):
     """세션 ID를 그대로 이어붙이지 않는다."""
     assert "encodeURIComponent(session.session_id)" in work
     assert "encodeURIComponent(sessionId)" in work
+
+
+def test_experiment_name_is_prefilled_with_todays_date(work):
+    """실험명은 20260729- 형태로 채워두고 뒤를 사용자가 잇는다."""
+    assert "const todayPrefix = () =>" in work
+    assert "now.getFullYear() + pad(now.getMonth() + 1) + pad(now.getDate()) + '-'" in work
+    assert "field.placeholder = todayPrefix()" in work
+
+
+def test_experiment_name_does_not_overwrite_what_the_user_typed(work):
+    """사용자가 쓴 꼬리표를 날짜로 덮어쓰면 실험명을 잃는다."""
+    assert "BARE_PREFIX_RE = /^\\d{8}-$/" in work
+    assert "if (value !== '' && value !== BASELINE_DEFAULT && !BARE_PREFIX_RE.test(value)) return;" in work
+
+
+def test_experiment_name_is_restamped_before_the_measurement_starts(work):
+    """자정을 넘겨 페이지를 켜 둔 채 시작하면 날짜가 어제로 남는다."""
+    # capture 단계여야 앱의 시작 핸들러보다 먼저 돈다.
+    assert "start.addEventListener('click', stampPrefix, true)" in work
+
+
+def test_experiment_name_puts_the_caret_after_the_prefix(work):
+    assert "field.setSelectionRange(end, end)" in work

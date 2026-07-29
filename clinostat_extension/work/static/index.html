@@ -2669,5 +2669,66 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 })();
 </script>
+<!-- ─── 실험명 날짜 접두사 ───────────────────────────────────────────────────
+     실험명을 "20260729-" 로 채워두고 뒤를 사용자가 잇는다. 베이스라인 마크업의
+     value="resistance-run" 은 append-only 계약 때문에 고칠 수 없어 JS로 덮는다.
+     ⚠ 자정을 넘겨 페이지를 켜 둔 채 측정을 시작하면 날짜가 어제로 남는다 —
+     그래서 측정 시작 직전(capture 단계)에 접두사만 남아 있으면 다시 찍는다. -->
+<script>
+(function () {
+  'use strict';
+
+  //: 접두사만 있고 아직 아무것도 안 쓴 상태. 이때만 마음대로 덮어쓴다.
+  const BARE_PREFIX_RE = /^\d{8}-$/;
+  //: 베이스라인 기본값. 사용자가 고른 값이 아니므로 덮어써도 된다.
+  const BASELINE_DEFAULT = 'resistance-run';
+
+  const todayPrefix = () => {
+    const now = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    return '' + now.getFullYear() + pad(now.getMonth() + 1) + pad(now.getDate()) + '-';
+  };
+
+  const input = () => document.getElementById('spacebioExperimentName');
+
+  /** 사용자가 쓴 꼬리표는 건드리지 않는다 — 비었거나 접두사뿐일 때만 다시 찍는다. */
+  function stampPrefix() {
+    const field = input();
+    if (!field || field.disabled) return;
+    const value = field.value.trim();
+    if (value !== '' && value !== BASELINE_DEFAULT && !BARE_PREFIX_RE.test(value)) return;
+    const next = todayPrefix();
+    if (field.value !== next) field.value = next;
+  }
+
+  function caretToEnd() {
+    const field = input();
+    if (!field) return;
+    const end = field.value.length;
+    try { field.setSelectionRange(end, end); } catch (e) { /* 무시 */ }
+  }
+
+  function mount() {
+    const field = input();
+    if (!field) return;
+
+    field.placeholder = todayPrefix() + '실험이름';
+    stampPrefix();
+
+    // 클릭해서 들어오면 커서를 접두사 뒤에 둔다 — 앞을 지우려고 온 게 아니다.
+    field.addEventListener('focus', () => setTimeout(caretToEnd, 0));
+
+    // 측정 시작 핸들러보다 먼저 돌아야 날짜가 최신으로 들어간다.
+    const start = document.getElementById('resistanceStart');
+    if (start) start.addEventListener('click', stampPrefix, true);
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', mount);
+  } else {
+    mount();
+  }
+})();
+</script>
 </body>
 </html>
