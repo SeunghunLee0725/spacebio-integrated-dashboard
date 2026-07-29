@@ -170,6 +170,7 @@ class GatewayRuntime:
             state = SessionState.FAILED
         self._current_session_status = SessionStatus(
             state=state, session_id=self.recovery.session_id, experiment_name=None,
+            data_dir=self._session_data_dir(self.recovery.session_id),
         )
 
     async def shutdown(self) -> None:
@@ -480,10 +481,17 @@ class GatewayRuntime:
 
     # ─────────────────────────── 세션 ───────────────────────────
 
+    def _session_data_dir(self, session_id: Optional[str]) -> Optional[str]:
+        """세션 데이터가 쌓이는 실제 경로. session_store의 배치와 같아야 한다."""
+        if not session_id:
+            return None
+        return str(self._config.data_root / "sessions" / session_id)
+
     def _status_from_snapshot(self, snapshot: SessionSnapshot) -> SessionStatus:
         return SessionStatus(
             state=SessionState(snapshot.status), session_id=snapshot.session_id,
             experiment_name=snapshot.experiment_name,
+            data_dir=self._session_data_dir(snapshot.session_id),
         )
 
     async def session_command(self, command: SessionCommand) -> SessionStatus:

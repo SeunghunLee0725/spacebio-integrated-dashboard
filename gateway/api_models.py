@@ -383,6 +383,9 @@ class SessionStatus(_Status):
     state: SessionState = SessionState.IDLE
     session_id: Optional[str] = None
     experiment_name: Optional[str] = None
+    #: 이 세션의 데이터가 실제로 쌓이는 디렉터리(<data_root>/sessions/<session_id>).
+    #: 화면이 파이 경로를 하드코딩하지 않도록 서버가 알려준다.
+    data_dir: Optional[str] = None
 
 
 class GatewayStatus(_Status):

@@ -1729,6 +1729,9 @@ window.addEventListener('resize', scheduleCameraResize);
    Chart.js maintainAspectRatio:false 는 컨테이너 높이를 따르므로 여기서 고정한다. */
 /* 세션·측정 관계 안내. 지금 눌러야 할 것과 기록 여부를 한 줄로 알려준다. */
 #spacebioPanel .sb-hint { margin-top: 6px; font-size: 12px; line-height: 1.5; opacity: .85; }
+/* 저장 경로는 길어서 줄바꿈을 허용하고 등폭으로 보여준다. */
+#spacebioPanel .sb-path { font-family: ui-monospace, Menlo, monospace; font-size: 11px;
+  word-break: break-all; text-align: right; max-width: 62%; }
 #spacebioPanel .sb-hint.warn { color: #ffb703; opacity: 1; }
 #spacebioPanel .sb-chart-wrap { position: relative; height: 280px; }
 #spacebioPanel .sb-chart-wrap canvas { width: 100% !important; height: 100% !important; }
@@ -1762,34 +1765,37 @@ window.addEventListener('resize', scheduleCameraResize);
   <div class="sb-sub" id="spacebioSubtitle">저항센서 · 펌프 · 통합 세션 기록</div>
 
   <div class="sb-grid">
-    <div class="sb-card">
-      <h3>Gateway</h3>
-      <div class="sb-row"><span>상태</span><span id="spacebioGatewayState">-</span></div>
-      <div class="sb-row"><span>마지막 응답</span><span id="spacebioGatewayLastSeen">-</span></div>
-      <div class="sb-err" id="spacebioGatewayError"></div>
-      <div class="sb-row"><span>세션 ID</span><span id="spacebioSessionId">-</span></div>
-      <div class="sb-row"><span>기록 상태</span><span id="spacebioSessionRecordingState">idle</span></div>
-      <div class="sb-row"><span>시작 시각</span><span id="spacebioSessionStartedAt">-</span></div>
-      <div class="sb-row"><span>경과</span><span id="spacebioSessionElapsed">-</span></div>
-      <label for="spacebioExperimentName">실험명</label>
-      <input id="spacebioExperimentName" type="text" value="simulation-smoke">
-      <button id="spacebioSessionStart">① 세션 시작 (기록)</button>
-      <button id="spacebioSessionFinish">④ 세션 종료</button>
-      <div class="sb-hint" id="spacebioRecordingHint"></div>
-    </div>
-
+    <!-- Gateway 카드를 여기로 합쳤다. 세션은 측정 시작/정지가 알아서 열고 닫으므로
+         운영자가 볼 것은 "실험명 → 측정 시작"과 "어디에 저장되는가" 둘뿐이다. -->
     <div class="sb-card">
       <h3>저항센서 <span class="sb-badge" id="resistanceModeBadge">-</span></h3>
       <!-- 실기 BLE 센서 전용. CSV 재생·합성 신호·USB 시리얼 모드는 화면에서 제거했다
            (백엔드에는 남아 있어 필요하면 API로 직접 설정할 수 있다). -->
       <div class="sb-row"><span>연결</span><span>BLE 무선 (ResistanceSensor)</span></div>
-      <button id="resistanceStart">② 측정 시작</button>
-      <button id="resistanceStop">③ 측정 정지</button>
+      <label for="spacebioExperimentName">실험명</label>
+      <input id="spacebioExperimentName" type="text" value="resistance-run">
+      <button id="resistanceStart">측정 시작</button>
+      <button id="resistanceStop">측정 정지</button>
+      <div class="sb-hint" id="spacebioRecordingHint"></div>
+
       <div class="sb-row"><span>저항</span><span id="resistanceValue">-</span></div>
       <div class="sb-row"><span>ΔR/R₀</span><span id="resistanceDelta">-</span></div>
       <div class="sb-row"><span>raw ADC</span><span id="resistanceAdc">-</span></div>
       <div class="sb-row"><span>온도 (°C)</span><span id="resistanceTemperature">-</span></div>
       <div class="sb-row"><span>배터리 (%)</span><span id="resistanceBattery">-</span></div>
+    </div>
+
+    <div class="sb-card">
+      <h3>기록</h3>
+      <div class="sb-row"><span>기록 상태</span><span id="spacebioSessionRecordingState">idle</span></div>
+      <div class="sb-row"><span>세션 ID</span><span id="spacebioSessionId">-</span></div>
+      <div class="sb-row"><span>시작 시각</span><span id="spacebioSessionStartedAt">-</span></div>
+      <div class="sb-row"><span>경과</span><span id="spacebioSessionElapsed">-</span></div>
+      <div class="sb-row"><span>저장 위치</span><span class="sb-path" id="spacebioDataPath">-</span></div>
+      <div class="sb-hint" id="spacebioStorageHint"></div>
+      <div class="sb-row"><span>Gateway</span><span id="spacebioGatewayState">-</span></div>
+      <div class="sb-row"><span>마지막 응답</span><span id="spacebioGatewayLastSeen">-</span></div>
+      <div class="sb-err" id="spacebioGatewayError"></div>
     </div>
 
     <div class="sb-card">
@@ -1920,28 +1926,48 @@ function spacebioSyncResetButton() {
 // 또 이미 도는 상태에서 시작을 다시 누르면 백엔드가 409를 냈는데, 애초에
 // 누를 수 없게 막는 편이 낫다.
 function spacebioSyncActionButtons() {
-  const recording = spacebioSessionState === 'recording';
   const measuring = spacebioSensorState === 'running';
-
-  sbEl('spacebioSessionStart').disabled = recording;
-  sbEl('spacebioSessionFinish').disabled = !recording;
   sbEl('resistanceStart').disabled = measuring;
   sbEl('resistanceStop').disabled = !measuring;
+  sbEl('spacebioExperimentName').disabled = measuring;   // 측정 중 실험명 변경 금지
 
   const hint = sbEl('spacebioRecordingHint');
   hint.classList.remove('warn');
-  if (!recording && !measuring) {
-    hint.textContent = '① 세션 시작 → ② 측정 시작 순서로 누르세요. '
-      + '세션이 열려 있어야 데이터가 파일로 기록됩니다.';
-  } else if (!recording && measuring) {
-    hint.textContent = '⚠ 세션이 없어 화면에만 표시되고 기록되지 않습니다. '
-      + '기록하려면 측정을 정지하고 세션을 먼저 시작하세요.';
-    hint.classList.add('warn');
-  } else if (recording && !measuring) {
-    hint.textContent = '세션이 열렸습니다. ② 측정 시작을 누르면 기록이 시작됩니다.';
-  } else {
-    hint.textContent = '기록 중입니다. 끝내려면 ③ 측정 정지 → ④ 세션 종료.';
+  hint.textContent = measuring
+    ? '기록 중입니다. 정지하면 세션이 닫히고 파일이 확정됩니다.'
+    : '실험명을 넣고 측정 시작을 누르면 세션이 자동으로 만들어집니다.';
+}
+
+// 세션은 측정 시작/정지가 알아서 연다. 운영자가 따로 누를 버튼은 없다.
+async function spacebioStartSession() {
+  const stamp = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  // ⚠ 서버가 세션 ID 형식을 강제한다: ^spacebio_\d{8}_\d{6}_[A-Za-z0-9]+$
+  //   접두사·자릿수를 지켜야 하고 꼬리표는 **영숫자만** 된다(하이픈·밑줄 불가).
+  //   그래서 실험명은 영숫자만 남겨 꼬리표로 쓴다 — 폴더명만 봐도 어느 실험인지
+  //   알 수 있고, 원본 실험명은 experiment_name 으로 manifest.json 에 남는다.
+  const tag = (sbEl('spacebioExperimentName').value || '')
+    .replace(/[^A-Za-z0-9]/g, '').slice(0, 24)
+    || Math.random().toString(36).replace(/[^a-z0-9]/g, '').slice(0, 4) || 'run';
+  const sid = 'spacebio_' + stamp.getFullYear() + pad(stamp.getMonth() + 1)
+    + pad(stamp.getDate()) + '_' + pad(stamp.getHours()) + pad(stamp.getMinutes())
+    + pad(stamp.getSeconds()) + '_' + tag;
+  await spacebioFetch('/api/spacebio/session/start', { method: 'POST', body: {
+    session_id: sid, experiment_name: sbEl('spacebioExperimentName').value,
+    started_at: stamp.toISOString() } });
+  spacebioLog('세션 시작: ' + sid);
+  return sid;
+}
+
+async function spacebioFinishSession() {
+  const current = sbEl('spacebioSessionId').textContent;
+  if (spacebioSessionState !== 'recording' || !current || current === '-') {
+    return null;      // 열린 세션이 없으면 조용히 넘어간다 (422 방지)
   }
+  await spacebioFetch('/api/spacebio/session/finish', { method: 'POST', body: {
+    session_id: current, finished_at: new Date().toISOString(),
+    clinostat_run_id: null } });
+  return current;
 }
 
 async function spacebioResetEstop() {
@@ -1975,6 +2001,17 @@ function spacebioRenderStatus(status) {
   spacebioSessionState = session.state || 'idle';
   spacebioSensorState = (status.sensor || {}).state || 'idle';
   spacebioSyncActionButtons();
+
+  // 저항 값이 어디에 쌓이는지. 경로는 서버가 알려준다(화면이 하드코딩하지 않는다).
+  sbEl('spacebioDataPath').textContent = session.data_dir
+    ? session.data_dir + '/sensor_samples.csv' : '-';
+  // 실측: 36 Hz × 106 B/행 ≈ 13 MB/시간. 얼마나 쌓였는지 감을 준다.
+  const elapsedS = spacebioSessionStartedAt
+    ? (Date.now() - spacebioSessionStartedAt) / 1000 : 0;
+  sbEl('spacebioStorageHint').textContent = session.data_dir
+    ? '약 13 MB/시간 (실측 36 Hz) · 현재 약 '
+      + (elapsedS * 13 / 3600).toFixed(1) + ' MB'
+    : '';
   if (session.state === 'recording' && !spacebioSessionStartedAt) {
     spacebioSessionStartedAt = Date.now();
     sbEl('spacebioSessionStartedAt').textContent = new Date().toLocaleTimeString();
@@ -2078,17 +2115,22 @@ async function spacebioInit() {
   sbEl('pumpResetAcknowledgement').addEventListener('input', spacebioSyncResetButton);
   spacebioSyncResetButton();
 
+  // 측정 시작 = 세션 열기 + 센서 시작. 운영자가 두 단계를 순서대로 누르며
+  // 헷갈리던 것을 하나로 합쳤다. 세션이 이미 열려 있으면 그것을 그대로 쓴다.
   sbEl('resistanceStart').onclick = async () => {
+    if (spacebioSessionState !== 'recording') {
+      await spacebioStartSession();
+    }
     await spacebioConfigureSensor();
     await spacebioFetch('/api/spacebio/sensor/start', { method: 'POST', body: {} });
-    // 세션 없이 측정하면 화면에만 보이고 파일에는 안 남는다 — 조용히 넘기지 않는다.
-    spacebioLog(spacebioSessionState === 'recording'
-      ? '센서 측정 시작 (기록 중)'
-      : '센서 측정 시작 — ⚠ 세션이 없어 기록되지 않습니다');
+    spacebioLog('측정 시작 — 기록 중');
   };
+  // 측정 정지 = 센서 정지 + 세션 닫기. 세션을 열어둔 채 두면 다음 측정이
+  // 같은 세션에 이어 붙어 실험 구분이 흐려진다.
   sbEl('resistanceStop').onclick = async () => {
     await spacebioFetch('/api/spacebio/sensor/stop', { method: 'POST', body: {} });
-    spacebioLog('센서 정지');
+    const finished = await spacebioFinishSession();
+    spacebioLog(finished ? '측정 정지 — 기록 저장 완료 (' + finished + ')' : '측정 정지');
   };
   sbEl('pumpDispense').onclick = async () => {
     await spacebioFetch('/api/spacebio/pump/dispense', { method: 'POST', body: {
@@ -2110,29 +2152,6 @@ async function spacebioInit() {
   };
   sbEl('pumpResetEmergencyStop').onclick = spacebioResetEstop;
 
-  sbEl('spacebioSessionStart').onclick = async () => {
-    const stamp = new Date();
-    const pad = (n) => String(n).padStart(2, '0');
-    const sid = 'spacebio_' + stamp.getFullYear() + pad(stamp.getMonth() + 1)
-      + pad(stamp.getDate()) + '_' + pad(stamp.getHours()) + pad(stamp.getMinutes())
-      + pad(stamp.getSeconds()) + '_' + Math.random().toString(36).slice(2, 6);
-    await spacebioFetch('/api/spacebio/session/start', { method: 'POST', body: {
-      session_id: sid, experiment_name: sbEl('spacebioExperimentName').value,
-      started_at: stamp.toISOString() } });
-    spacebioLog('세션 시작: ' + sid);
-  };
-  sbEl('spacebioSessionFinish').onclick = async () => {
-    // 화면 텍스트를 그대로 보내면 세션이 없을 때 '-'가 전송돼 422가 났다.
-    const current = sbEl('spacebioSessionId').textContent;
-    if (spacebioSessionState !== 'recording' || !current || current === '-') {
-      spacebioLog('종료할 세션이 없습니다');
-      return;
-    }
-    await spacebioFetch('/api/spacebio/session/finish', { method: 'POST', body: {
-      session_id: current, finished_at: new Date().toISOString(),
-      clinostat_run_id: null } });
-    spacebioLog('세션 종료: ' + current);
-  };
 
   try {
     spacebioRenderStatus(await spacebioFetch('/api/spacebio/status'));

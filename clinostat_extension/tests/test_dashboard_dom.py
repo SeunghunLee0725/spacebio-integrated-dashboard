@@ -74,8 +74,9 @@ def test_chartjs_is_reused_not_reloaded(work):
 
 NEW_IDS = [
     "spacebioGatewayState", "spacebioGatewayLastSeen", "spacebioGatewayError",
-    "spacebioSessionId", "spacebioExperimentName", "spacebioSessionStart",
-    "spacebioSessionFinish", "spacebioSessionStartedAt", "spacebioSessionElapsed",
+    # 세션 시작/종료 버튼은 없앴다 — 측정 시작/정지가 세션을 알아서 연다.
+    "spacebioSessionId", "spacebioExperimentName",
+    "spacebioSessionStartedAt", "spacebioSessionElapsed",
     "spacebioSessionRecordingState", "spacebioEvents",
     "resistanceStart", "resistanceStop",
     "resistanceValue", "resistanceDelta", "resistanceAdc",
@@ -86,7 +87,7 @@ NEW_IDS = [
     "pumpEmergencyStop", "pumpResetAcknowledgement", "pumpResetEmergencyStop",
     "pumpStepCount", "pumpStepSpm", "pumpSendSteps", "pumpPositionSteps",
     "spacebioJumpLink", "resistanceModeBadge", "spacebioSubtitle",
-    "spacebioRecordingHint",
+    "spacebioRecordingHint", "spacebioDataPath", "spacebioStorageHint",
 ]
 
 
@@ -262,15 +263,6 @@ def test_jump_link_points_to_the_panel(work):
 # 측정 = 센서 스트림. 세션 없이 측정만 하면 화면에는 보여도 저장이 안 되고,
 # 이미 도는 상태에서 다시 누르면 백엔드가 409를 냈다. 애초에 못 누르게 막는다.
 
-def test_action_buttons_are_state_driven(work):
-    start = work.index("function spacebioSyncActionButtons")
-    section = work[start:work.index(chr(10) + "}", start)]
-    for target in ("spacebioSessionStart", "spacebioSessionFinish",
-                   "resistanceStart", "resistanceStop"):
-        assert target in section, f"{target} 활성 여부를 상태로 정하지 않는다"
-    assert "recording" in section and "running" in section
-
-
 def test_stale_recovery_reapplies_state_driven_disabling(work):
     """stale 해제 루프가 전부 되살리므로 그 뒤에 다시 입혀야 한다."""
     start = work.index("function spacebioSetStale")
@@ -278,20 +270,56 @@ def test_stale_recovery_reapplies_state_driven_disabling(work):
     assert "spacebioSyncActionButtons" in section
 
 
-def test_finish_does_not_send_placeholder_session_id(work):
-    """세션이 없을 때 화면의 '-'를 그대로 보내 422가 나던 것을 막는다."""
-    start = work.index("sbEl('spacebioSessionFinish').onclick")
-    section = work[start:start + 700]
-    assert "'-'" in section and "return" in section
-
-
-def test_measure_start_warns_when_not_recording(work):
-    start = work.index("sbEl('resistanceStart').onclick")
-    section = work[start:start + 700]
-    assert "기록되지 않습니다" in section
-
-
 def test_conflict_errors_are_shown_in_korean(work):
     start = work.index("async function spacebioFetch")
     section = work[start:work.index(chr(10) + "}", start)]
     assert "sensor_conflict" in section and "측정 정지" in section
+
+
+# ───────── 측정 시작/정지가 세션을 자동으로 연다 (2026-07-29 단순화) ─────────
+#
+# 세션 시작/종료 버튼을 따로 두니 순서를 헷갈리고 잘못 누르면 409/422가 났다.
+# 이제 운영자가 하는 일은 "실험명 입력 → 측정 시작"뿐이다.
+
+def test_session_buttons_are_gone(work):
+    for removed in ('id="spacebioSessionStart"', 'id="spacebioSessionFinish"'):
+        assert removed not in work, f"{removed} 가 남아 있다"
+
+
+def test_measure_start_opens_a_session(work):
+    start = work.index("sbEl('resistanceStart').onclick")
+    section = work[start:start + 600]
+    assert "spacebioStartSession" in section
+    assert "recording" in section, "이미 열린 세션이면 새로 만들지 않아야 한다"
+
+
+def test_measure_stop_closes_the_session(work):
+    start = work.index("sbEl('resistanceStop').onclick")
+    section = work[start:start + 600]
+    assert "sensor/stop" in section
+    assert "spacebioFinishSession" in section
+
+
+def test_finish_session_ignores_missing_session(work):
+    """열린 세션이 없을 때 화면의 '-'를 보내 422가 나던 것을 막는다."""
+    start = work.index("async function spacebioFinishSession")
+    section = work[start:work.index(chr(10) + "}", start)]
+    assert "'-'" in section and "return null" in section
+
+
+def test_session_id_matches_the_server_pattern(work):
+    """서버는 ^spacebio_\d{8}_\d{6}_[A-Za-z0-9]+$ 를 강제한다. 실험명을 그대로
+    넣으면 하이픈 때문에 422가 난다 — 영숫자만 남겨 꼬리표로 써야 한다."""
+    start = work.index("async function spacebioStartSession")
+    section = work[start:work.index(chr(10) + "}", start)]
+    assert "'spacebio_'" in section, "접두사를 지켜야 한다"
+    assert "spacebioExperimentName" in section
+    assert "[^A-Za-z0-9]" in section, "영숫자 외 문자를 걸러야 한다"
+
+
+def test_panel_shows_where_data_is_saved(work):
+    """저항 값이 어디에 쌓이는지 화면에 나와야 한다 — 경로는 서버가 준다."""
+    assert 'id="spacebioDataPath"' in work
+    assert "session.data_dir" in work
+    assert "sensor_samples.csv" in work
+    assert "/home/aiworker-1" not in work, "화면이 파이 경로를 하드코딩하면 안 된다"

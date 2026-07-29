@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -210,3 +211,26 @@ async def test_start_waits_for_pending_release(tmp_path: Path):
     assert source.closed is True
     await runtime.stop_sensor("r4")
     await runtime._await_sensor_release()
+
+
+# ─────────── 세션 저장 경로를 서버가 알려준다 (화면 하드코딩 방지) ───────────
+
+
+@pytest.mark.asyncio
+async def test_session_status_reports_data_dir(tmp_path: Path):
+    """저항 값이 어디에 쌓이는지 화면에 보여주려면 서버가 경로를 줘야 한다.
+    session_store의 배치(<data_root>/sessions/<session_id>)와 일치해야 한다."""
+    from gateway.api_models import SessionStartRequest
+
+    runtime = GatewayRuntime(make_gw_config(tmp_path))
+    sid = "spacebio_20260729_180000_resistancerun"
+    await runtime.session_command(SessionStartRequest(
+        request_id="r1", session_id=sid, experiment_name="resistance-run",
+        started_at=datetime.now(timezone.utc),
+    ))
+
+    status = (await runtime.status()).session
+    assert status.session_id == sid
+    assert status.data_dir is not None
+    assert status.data_dir.endswith(f"sessions/{sid}")
+    assert Path(status.data_dir).is_dir(), "실제로 만들어진 디렉터리를 가리켜야 한다"

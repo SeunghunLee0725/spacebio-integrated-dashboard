@@ -293,7 +293,10 @@ def test_session_status_for_unknown_session_is_explicit_idle(client: TestClient)
     )
     assert resp.status_code == 200
     data = resp.json()["data"]
-    assert data == {"state": "idle", "session_id": None, "experiment_name": None}
+    # data_dir는 세션이 있을 때만 채워진다 — 화면이 저장 경로를 하드코딩하지 않도록
+    # 서버가 알려주는 필드다.
+    assert data == {"state": "idle", "session_id": None, "experiment_name": None,
+                    "data_dir": None}
 
 
 def test_session_finish_writes_expected_file_formats(tmp_path):
