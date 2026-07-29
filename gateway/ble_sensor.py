@@ -275,11 +275,18 @@ class BleSensorSource:
 class _BleakClientAdapter:
     """실제 bleak 백엔드. `BleClient` 프로토콜에 맞춘 얇은 어댑터."""
 
+    #: 재연결 때 주소로 바로 찾을 때 쓰는 짧은 탐색 시간. 전체 스캔(15초)을 다시
+    #: 돌리면 끊길 때마다 20초 넘는 공백이 생긴다 — 실기에서 45~150초마다 끊기므로
+    #: 이 공백이 "신호가 들어오다 안 들어오다" 하는 원인이 된다.
+    REDISCOVER_TIMEOUT_S = 4.0
+
     def __init__(self) -> None:
         self._client: Any = None
         self._data_uuid = SENSOR_DATA_UUID
         self._queue: asyncio.Queue[bytes] = asyncio.Queue()
         self._disconnected = asyncio.Event()
+        #: 한 번 붙었던 장치 주소. 재연결을 빠르게 하려고 기억한다.
+        self._known_address: Optional[str] = None
 
     async def connect(self, target: BleTarget, timeout: float) -> bool:
         try:
@@ -287,9 +294,11 @@ class _BleakClientAdapter:
         except ImportError as exc:  # pragma: no cover — 배포 환경 문제
             raise SensorSourceError("bleak is required for BLE_LIVE mode") from exc
 
-        device = await self._discover(BleakScanner, target, timeout)
+        device = await self._discover(
+            BleakScanner, target, timeout, known_address=self._known_address)
         if device is None:
             return False
+        self._known_address = device.address
         # 끊김을 이벤트로 받는다. 이게 없으면 stream()이 큐에서 영원히 대기해
         # 보드가 리셋돼도 아무도 모른다(2026-07-29 전원 교체 시험 전에 발견).
         self._client = BleakClient(
@@ -303,15 +312,25 @@ class _BleakClientAdapter:
         await self._client.start_notify(self._data_uuid, self._on_notify)
         return True
 
-    @staticmethod
-    async def _discover(scanner: Any, target: BleTarget, timeout: float) -> Any:
-        """address → service UUID 순으로 찾는다. 이름은 동점일 때의 선호도일 뿐.
+    @classmethod
+    async def _discover(cls, scanner: Any, target: BleTarget, timeout: float,
+                        known_address: Optional[str] = None) -> Any:
+        """설정된 address → 직전 주소 → 서비스 UUID 순으로 찾는다.
 
-        이름 기반 탐색을 쓰지 않는 이유는 `BleTarget` 주석 참고 — 이 센서는
-        광고에 Local Name 을 넣지 않는다.
+        `known_address` 는 한 번 붙었던 장치다. 재연결마다 전체 스캔(15초)을 다시
+        돌리면 끊길 때마다 20초 넘는 공백이 생긴다 — 실기에서 45~150초마다 끊기므로
+        그 공백이 곧 "신호가 끊겼다 들어왔다" 로 보인다. 주소를 알면 짧게 찾는다.
+
+        이름 기반 탐색을 쓰지 않는 이유는 `BleTarget` 주석 참고.
         """
         if target.address:
             return await scanner.find_device_by_address(target.address, timeout=timeout)
+        if known_address:
+            found = await scanner.find_device_by_address(
+                known_address, timeout=cls.REDISCOVER_TIMEOUT_S)
+            if found is not None:
+                return found
+            # 못 찾으면 전체 스캔으로 넘어간다 — 주소가 바뀌었을 수도 있다.
 
         wanted = target.service_uuid.lower()
         found = await scanner.discover(timeout=timeout, return_adv=True)

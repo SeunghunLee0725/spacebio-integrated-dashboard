@@ -443,3 +443,36 @@ async def test_gives_up_after_initial_attempts_exhausted():
         src.tick()
     await src.aclose()
     assert client.attempts == 2
+
+
+# ───── 재연결 빠르게 (실기: 45~150초마다 끊김, 매번 전체 스캔이면 20초 공백) ─────
+
+
+@pytest.mark.asyncio
+async def test_reconnect_uses_known_address_instead_of_full_scan():
+    dev = _Dev("2D:62:81:2C:26:C2")
+    scanner = FakeScanner({dev.address: (dev, _Adv([SERVICE_UUID]))})
+    found = await _BleakClientAdapter._discover(
+        scanner, BleTarget(), 15.0, known_address=dev.address)
+    assert found is dev
+    assert scanner.by_address_calls == [dev.address], "전체 스캔을 건너뛰어야 한다"
+
+
+@pytest.mark.asyncio
+async def test_reconnect_falls_back_to_full_scan_if_address_gone():
+    """주소가 바뀌었을 수 있다 — 못 찾으면 전체 스캔으로 넘어가야 한다."""
+    dev = _Dev("11:22:33:44:55:66")
+    scanner = FakeScanner({dev.address: (dev, _Adv([SERVICE_UUID]))})
+    found = await _BleakClientAdapter._discover(
+        scanner, BleTarget(), 15.0, known_address="AA:AA:AA:AA:AA:AA")
+    assert found is dev, "전체 스캔으로 되찾아야 한다"
+
+
+@pytest.mark.asyncio
+async def test_explicit_address_takes_priority_over_cached():
+    a, b = _Dev("11:11:11:11:11:11"), _Dev("22:22:22:22:22:22")
+    scanner = FakeScanner({a.address: (a, _Adv([SERVICE_UUID])),
+                           b.address: (b, _Adv([SERVICE_UUID]))})
+    found = await _BleakClientAdapter._discover(
+        scanner, BleTarget(address=b.address), 15.0, known_address=a.address)
+    assert found is b
