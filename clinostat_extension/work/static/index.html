@@ -1724,6 +1724,30 @@ window.addEventListener('resize', scheduleCameraResize);
 #spacebioPanel .sb-sub { color: var(--text-dim); font-size: 12px; margin-bottom: 14px; }
 #spacebioPanel .sb-grid { display: grid; gap: 14px;
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+/* ── IMU 9개 값을 1행 9열로 압축 (2026-07-29) ────────────────────────────
+   Roll/Pitch/Yaw · Accel XYZ · Gyro XYZ 가 3행 3열로 화면 위쪽을 크게 차지해
+   아래 그래프·카메라가 밀렸다. 한 줄로 줄인다.
+   ⚠ 기존 규칙(.sensor-grid/.sensor-card)을 고치지 않고 **뒤에서 덮어쓴다** —
+     work 는 baseline 에 덧붙이기만 해야 한다는 계약이 있다
+     (test_work_copies_are_a_superset_of_the_captured_baseline). */
+.sensor-grid { grid-template-columns: repeat(9, 1fr); gap: 6px; }
+.sensor-card { padding: 6px 4px; min-width: 0; }   /* min-width:0 — grid 항목이 내용 때문에 안 줄어드는 것 방지 */
+/* 라벨이 열 너비보다 길다("Gyro X (deg/s)") — 줄바꿈 대신 말줄임으로 높이를 고정한다. */
+.sensor-card .label {
+  font-size: 0.62em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sensor-card .value { font-size: 0.95em; }
+/* 좁은 화면에서 9열은 읽을 수 없다 — 원래 3열로 돌린다. */
+@media (max-width: 900px) {
+  .sensor-grid { grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  .sensor-card { padding: 10px 8px; }
+  .sensor-card .label { font-size: 0.72em; white-space: normal; }
+  .sensor-card .value { font-size: 1.2em; }
+}
+
 #spacebioPanel .sb-card { background: var(--card); border-radius: var(--radius); padding: 12px; }
 /* 저항 추이 그래프 높이 — 클리노스텟 RPM 그래프와 같은 크기로 맞춘다.
    Chart.js maintainAspectRatio:false 는 컨테이너 높이를 따르므로 여기서 고정한다. */
