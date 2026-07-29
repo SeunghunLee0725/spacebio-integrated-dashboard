@@ -126,6 +126,9 @@ class GatewayRuntime:
         self._sensor_source: Optional[Any] = None
         self._sensor_sample: Optional[SensorSample] = None
         self._sensor_task: Optional[asyncio.Task[None]] = None
+        #: 진행 중인 하드웨어 해제. 정지 응답을 막지 않으려고 백그라운드로 돌리고,
+        #: 다음 start/configure가 이것을 기다린다.
+        self._sensor_release_task: Optional[asyncio.Task[None]] = None
 
         self._session_cache = IdempotencyCache()
         self._active_store: Optional[SessionStore] = None
@@ -252,6 +255,7 @@ class GatewayRuntime:
         ]
 
     async def configure_sensor(self, request: SensorConfigCommand) -> SensorStatus:
+        await self._await_sensor_release()   # 이전 해제가 끝난 뒤에 새 소스를 만든다
         async with self._lock:
             if self._sensor_state == SensorState.RUNNING:
                 raise SensorConflictError("sensor is running; stop before reconfiguring")
@@ -307,6 +311,7 @@ class GatewayRuntime:
 
     async def start_sensor(self, request_id: str) -> SensorStatus:
         del request_id  # 센서 시작은 멱등이 요구되지 않는다 — 재시작 요청은 409.
+        await self._await_sensor_release()   # 직전 정지의 하드웨어 해제를 먼저 끝낸다
         async with self._lock:
             if self._sensor_source is None:
                 raise SensorConflictError("sensor is not configured")
@@ -334,8 +339,31 @@ class GatewayRuntime:
         async with self._lock:
             # 실기 소스는 하드웨어 자원을 잡고 있다 — 정지 시 반드시 놓아준다.
             # (BLE는 연결이 남으면 다음 start에서 스캔조차 실패한다)
-            await self._release_sensor_source()
+            #
+            # ⚠ 다만 **응답을 기다리게 하지 않는다.** BLE 해제는 수 초가 걸리는데
+            #   프록시의 변경요청 예산은 1초라, 정지는 실제로 성공했는데 화면에는
+            #   504로 보였다(2026-07-29 실기 재현). 해제는 뒤에서 진행하고,
+            #   다음 start/configure가 그것을 기다린다.
+            self._schedule_sensor_release()
             return self._sensor_status_locked()
+
+    def _schedule_sensor_release(self) -> None:
+        """소스 자원 해제를 백그라운드로 돌린다. 이미 돌고 있으면 그대로 둔다."""
+        if self._sensor_release_task is not None and not self._sensor_release_task.done():
+            return
+        self._sensor_release_task = asyncio.create_task(self._release_sensor_source())
+
+    async def _await_sensor_release(self) -> None:
+        """진행 중인 해제가 끝나기를 기다린다.
+
+        해제가 끝나기 전에 새로 start/configure 하면 BLE가 아직 붙어 있어
+        스캔조차 실패한다. 시작하는 쪽이 값을 치른다 — 정지는 빨라야 한다.
+        """
+        task, self._sensor_release_task = self._sensor_release_task, None
+        if task is None:
+            return
+        with contextlib.suppress(Exception):
+            await task
 
     async def _release_sensor_source(self) -> None:
         """센서 소스가 잡은 자원(시리얼 포트/BLE 연결)을 놓아준다.

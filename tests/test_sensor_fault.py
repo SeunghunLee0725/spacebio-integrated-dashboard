@@ -83,6 +83,7 @@ async def test_stop_releases_source_but_keeps_it_configured(tmp_path: Path):
 
     await runtime.start_sensor("r1")
     await runtime.stop_sensor("r2")
+    await runtime._await_sensor_release()           # 해제는 백그라운드로 돈다
 
     assert source.closed is True                    # 자원은 놓았고
     assert runtime._sensor_source is source         # 설정은 남아 있다
@@ -154,3 +155,58 @@ async def test_poll_bounds_work_per_tick(tmp_path: Path):
 
     assert remaining_after_one_tick >= 20 - MAX_SAMPLES_PER_TICK * 1, \
         "한 tick에서 상한을 넘겨 처리하면 안 된다"
+
+
+# ───────── 정지 응답이 하드웨어 해제를 기다리지 않는다 (504 재현 대응) ─────────
+
+
+class SlowReleaseSource:
+    """aclose()가 오래 걸리는 소스 — BLE 해제(수 초)를 흉내낸다."""
+
+    def __init__(self, delay: float = 3.0):
+        self._delay = delay
+        self.closed = False
+
+    def start(self) -> None: ...
+
+    def tick(self):
+        return None
+
+    async def aclose(self) -> None:
+        await asyncio.sleep(self._delay)
+        self.closed = True
+
+
+@pytest.mark.asyncio
+async def test_stop_returns_before_slow_hardware_release(tmp_path: Path):
+    """프록시의 변경요청 예산은 1초다. 정지가 BLE 해제를 기다리면 실제로는
+    성공했는데 화면에는 504로 보인다(2026-07-29 실기 재현)."""
+    runtime = GatewayRuntime(make_gw_config(tmp_path))
+    source = SlowReleaseSource(delay=3.0)
+    runtime._sensor_source = source
+
+    await runtime.start_sensor("r1")
+    t0 = asyncio.get_running_loop().time()
+    await runtime.stop_sensor("r2")
+    elapsed = asyncio.get_running_loop().time() - t0
+
+    assert elapsed < 1.0, f"정지가 {elapsed:.1f}s 걸렸다 — 프록시 예산을 넘긴다"
+    assert source.closed is False, "해제는 아직 진행 중이어야 한다"
+    await runtime._await_sensor_release()
+    assert source.closed is True
+
+
+@pytest.mark.asyncio
+async def test_start_waits_for_pending_release(tmp_path: Path):
+    """해제가 끝나기 전에 다시 시작하면 BLE가 아직 붙어 있어 스캔조차 실패한다."""
+    runtime = GatewayRuntime(make_gw_config(tmp_path))
+    source = SlowReleaseSource(delay=0.3)
+    runtime._sensor_source = source
+
+    await runtime.start_sensor("r1")
+    await runtime.stop_sensor("r2")
+    await runtime.start_sensor("r3")          # 여기서 해제 완료를 기다려야 한다
+
+    assert source.closed is True
+    await runtime.stop_sensor("r4")
+    await runtime._await_sensor_release()
