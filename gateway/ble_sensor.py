@@ -260,12 +260,16 @@ class _BleakClientAdapter:
         device = await self._discover(BleakScanner, target, timeout)
         if device is None:
             return False
-        self._disconnected.clear()
         # 끊김을 이벤트로 받는다. 이게 없으면 stream()이 큐에서 영원히 대기해
         # 보드가 리셋돼도 아무도 모른다(2026-07-29 전원 교체 시험 전에 발견).
         self._client = BleakClient(
             device, disconnected_callback=lambda _c: self._disconnected.set())
         await self._client.connect()
+        # ⚠ 이벤트는 반드시 connect() **뒤에** 지운다.
+        #   BlueZ 백엔드는 연결이 맺힐 때까지 내부적으로 재시도하며 그 실패마다
+        #   disconnected_callback 을 부른다(실측: 성공 전까지 13회). connect() 앞에서
+        #   지우면 반환 시점에 이미 set 이라 stream() 이 첫 패킷도 못 받고 끝난다.
+        self._disconnected.clear()
         await self._client.start_notify(self._data_uuid, self._on_notify)
         return True
 
