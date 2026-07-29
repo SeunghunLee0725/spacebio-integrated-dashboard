@@ -56,15 +56,15 @@ def test_clinostat_registers_the_dataset_proxy_route():
     assert '"/api/spacebio/sensor/datasets"' in source
 
 
-def test_panel_populates_the_dataset_dropdown():
-    """빈 드롭다운은 CSV 모드를 쓸 수 없게 만든다 — 실제로 그렇게 배포됐었다."""
+def test_panel_no_longer_exposes_the_dataset_dropdown():
+    """센서 패널은 실기 BLE 전용이 됐다 — CSV 재생 UI는 화면에서 제거했다.
+
+    `/api/spacebio/sensor/datasets` 라우트 자체는 남아 있고(위 테스트들이 검증한다)
+    필요하면 API로 직접 CSV 모드를 설정할 수 있다.
+    """
     html = (WORK / "static" / "index.html").read_text(encoding="utf-8")
-    assert "spacebioLoadDatasets" in html
-    section = html[html.index("async function spacebioLoadDatasets"):][:900]
-    assert "/api/spacebio/sensor/datasets" in section
-    assert "resistanceDataset" in section
-    assert re.search(r"createElement\(['\"]option['\"]\)|innerHTML|add\(", section), \
-        "option을 실제로 채우는 코드가 없다"
+    assert "spacebioLoadDatasets" not in html
+    assert 'id="resistanceDataset"' not in html
 
 
 # ─────────────────────────── 실기 배선 (2026-07-25) ───────────────────────────

@@ -77,9 +77,7 @@ NEW_IDS = [
     "spacebioSessionId", "spacebioExperimentName", "spacebioSessionStart",
     "spacebioSessionFinish", "spacebioSessionStartedAt", "spacebioSessionElapsed",
     "spacebioSessionRecordingState", "spacebioEvents",
-    "resistanceMode", "resistanceDataset", "resistanceBaselineOhm",
-    "resistanceAmplitudeOhm", "resistancePeriodS", "resistanceNoiseStdOhm",
-    "resistanceSeed", "resistanceStart", "resistanceStop",
+    "resistanceStart", "resistanceStop",
     "resistanceValue", "resistanceDelta", "resistanceAdc",
     "resistanceTemperature", "resistanceBattery", "resistanceChart",
     "pumpSimulatedBadge", "pumpState", "pumpEstopLatched",
@@ -100,7 +98,7 @@ def test_badges_reflect_actual_mode_not_hardcoded_simulated(work):
     render = work[work.index("function spacebioRenderStatus"):]
     render = render[:render.index("\nfunction ", 1)]
     assert "pumpSimulatedBadge" in render and "WIRELESS" in render
-    assert "resistanceModeBadge" in render and "SERIAL_LIVE" in render
+    assert "resistanceModeBadge" in render and "BLE_LIVE" in render
 
 
 def test_null_raw_adc_shows_dash_not_null(work):
@@ -140,25 +138,17 @@ def test_panel_only_calls_proxied_routes(work):
         assert path in work, f"{path} 호출이 없다"
 
 
-# ─────────────────────────── 모드 배타 ───────────────────────────
-
-def test_mode_switch_disables_the_other_modes_inputs(work):
-    """CSV 모드는 합성 입력을, 합성 모드는 dataset 선택을 비활성화한다."""
-    assert "spacebioApplySensorMode" in work
-    assert "CSV_REPLAY" in work and "SYNTHETIC" in work
-    section = work[work.index("function spacebioApplySensorMode"):][:1200]
-    assert "resistanceDataset" in section
-    assert "resistanceBaselineOhm" in section
-    assert "disabled" in section
-
-
 # ─────────────────────────── 비상정지 해제 ───────────────────────────
 
 def test_reset_button_is_gated_on_exact_acknowledgement(work):
     assert "RESET_SIMULATED_PUMP_ESTOP" in work
-    section = work[work.index("function spacebioSyncResetButton"):][:800]
+    # 함수 본문만 잘라서 본다. 이전엔 뒤 800자를 훑어 "===" 유무만 봤는데,
+    # 실제 비교는 `!==` 라 인접 함수의 "===" 때문에 우연히 통과하던 테스트였다.
+    start = work.index("function spacebioSyncResetButton")
+    section = work[start:work.index("\n}", start)]
     assert "pumpResetAcknowledgement" in section
-    assert "===" in section, "정확 일치 비교여야 한다"
+    assert "SPACEBIO_ESTOP_ACK" in section
+    assert "!==" in section or "===" in section, "정확 일치 비교여야 한다"
     assert "pumpResetEmergencyStop" in section
 
 
@@ -222,41 +212,25 @@ def test_stop_all_reports_both_results_independently(work):
 
 # ─────────────────────────── 데이터셋 드롭다운 (실기 결함 수정) ───────────────────────────
 
-def test_dataset_dropdown_is_populated_at_init(work):
-    """resistanceDataset이 빈 <select>로 남지 않도록 초기화 시점에 채워야 한다."""
-    assert "async function spacebioLoadDatasets" in work
-    assert "/api/spacebio/sensor/datasets" in work
-    init_section = work[work.index("async function spacebioInit"):][:2000]
-    assert "spacebioLoadDatasets()" in init_section
+# ─────────────────────── 실기 BLE 전용 패널 ───────────────────────
+#
+# 센서 측정 메뉴는 실기 BLE 센서만 다룬다. CSV 재생·합성 신호·USB 시리얼
+# 모드와 그 입력들은 화면에서 제거했다(백엔드에는 남아 있다).
+
+@pytest.mark.parametrize("removed", [
+    'value="CSV_REPLAY"', 'value="SYNTHETIC"', 'value="SERIAL_LIVE"',
+    'id="resistanceMode"', 'id="resistanceDataset"', 'id="resistanceSeed"',
+])
+def test_non_ble_sensor_controls_are_gone(work, removed):
+    assert removed not in work, f"{removed} 가 화면에 남아 있다"
 
 
-def test_dataset_dropdown_load_failure_does_not_crash_the_panel(work):
-    section = work[work.index("async function spacebioLoadDatasets"):][:700]
-    assert "try" in section and "catch" in section
-
-
-def test_dataset_dropdown_uses_sample_count_in_label(work):
-    section = work[work.index("async function spacebioLoadDatasets"):][:700]
-    assert "dataset_id" in section
-    assert "sample_count" in section
-
-
-# ─────────────────────────── 실기 센서(SERIAL_LIVE) 모드 ───────────────────────────
-
-def test_serial_live_mode_option_exists(work):
-    assert 'value="SERIAL_LIVE"' in work
-
-
-def test_serial_live_mode_disables_dataset_and_synthetic_inputs(work):
-    section = work[work.index("function spacebioApplySensorMode"):][:900]
-    assert "SERIAL_LIVE" in section
-    assert "resistanceDataset" in section
-    assert "resistanceBaselineOhm" in section
-
-
-def test_serial_live_configure_sends_mode_only(work):
-    section = work[work.index("async function spacebioConfigureSensor"):][:900]
-    assert "SYNTHETIC" in section, "합성 모드 분기가 명시적이어야 SERIAL_LIVE가 새지 않는다"
+def test_configure_always_sends_ble_live(work):
+    start = work.index("async function spacebioConfigureSensor")
+    section = work[start:work.index(chr(10) + "}", start)]
+    assert "BLE_LIVE" in section
+    for other in ("CSV_REPLAY", "SYNTHETIC", "SERIAL_LIVE"):
+        assert other not in section, f"{other} 분기가 남아 있다"
 
 
 # ─────────────────────────── 펌프 스텝 컨트롤 ───────────────────────────
