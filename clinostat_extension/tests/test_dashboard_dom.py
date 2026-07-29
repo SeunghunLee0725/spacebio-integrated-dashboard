@@ -433,7 +433,7 @@ def test_camera_stacks_above_rpm_chart_in_narrow_column(work):
     세로로 쌓아 열 전체 폭을 쓰되, 높이는 따로 묶는다(아래 테스트)."""
     wide = work[work.index("@media (min-width: 1600px)"):]
     wide = wide[:wide.index(chr(10) + "}")]
-    assert "cam-chart-row { grid-template-columns: 1fr !important; }" in wide
+    assert "cam-chart-row { grid-template-columns: 1fr 1fr !important; }" in wide
 
 
 def test_paper_metrics_stay_visible_in_a_full_width_row(work):
@@ -453,7 +453,7 @@ def test_metric_cards_min_height_is_released(work):
     wide = work[work.index("@media (min-width: 1600px)"):]
     wide = wide[:wide.index(chr(10) + "}")]
     assert "min-height: 0 !important" in wide
-    assert "repeat(2, minmax(0, 1fr))" in wide, "메트릭은 2×2 여야 한다"
+    assert "repeat(3, minmax(0, 1fr))" in wide, "중력벡터가 빠져 남은 3개는 한 줄"
 
 
 def test_charts_are_told_to_resize_after_relayout(work):
@@ -506,3 +506,17 @@ def test_chartjs_canvas_is_bound_to_card_height(work):
 
 def test_chartjs_is_resized_explicitly(work):
     assert "Chart.getChart(cv)" in work
+
+
+def test_sphere_card_sits_next_to_the_camera(work):
+    """카메라를 절반 폭으로 줄이고 그 자리에 중력벡터 분포를 넣는다."""
+    start = work.index("function spacebioApplyOneScreenLayout")
+    section = work[start:work.index(chr(10) + "}", start)]
+    assert "insertBefore(sphereCard, camCard.nextSibling)" in section
+
+
+def test_rpm_chart_spans_the_full_row_below(work):
+    """카메라 행이 2열이 되면 RPM 차트는 다음 줄 전체를 써야 한다."""
+    wide = work[work.index("@media (min-width: 1600px)"):]
+    wide = wide[:wide.index(chr(10) + "}")]
+    assert ".cam-chart-row .chart-card { grid-column: 1 / -1 !important; }" in wide

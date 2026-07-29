@@ -2280,8 +2280,9 @@ document.addEventListener('DOMContentLoaded', spacebioInit);
   /* 논문 메트릭 4개를 하단 전폭 한 줄로. 실시간으로 계속 보기 위함이다.
      ⚠ .metric-paper 의 min-height:280px 이 카드 높이를 잡고 있었다
        (.body 는 flex:1 이라 카드를 따라간다) — 그걸 풀어야 줄어든다. */
+  /* 중력벡터 분포가 카메라 옆으로 빠졌으므로 남은 3개를 한 줄에 둔다. */
   .metrics-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
     gap: 10px !important;
   }
   .metrics-grid .metric-paper {
@@ -2308,7 +2309,15 @@ document.addEventListener('DOMContentLoaded', spacebioInit);
   }
   /* 카메라와 RPM 차트를 세로로 쌓아 각자 열 전체 폭을 쓰게 한다.
      가로로 두면 열이 좁아 카메라가 세로로 길쭉해진다(실측 285×300). */
-  .cam-chart-row { grid-template-columns: 1fr !important; }
+  /* 카메라를 반으로 줄이고 그 옆에 중력벡터 분포를 둔다. RPM 차트는 다음 줄 전폭. */
+  .cam-chart-row { grid-template-columns: 1fr 1fr !important; }
+  .cam-chart-row .chart-card { grid-column: 1 / -1 !important; }
+  .cam-chart-row .metric-paper {
+    height: 330px !important;
+    min-height: 0 !important;
+    padding: 10px !important;
+    overflow: hidden !important;
+  }
   /* ⚠ 종횡비로 두면 열이 넓어진 만큼 카메라가 높아져(실측 폭 1,083 → 높이 648)
      넓힌 이득을 그대로 까먹는다. 카드 높이를 고정하고 영상이 그 안을 채우게 한다
      (img 는 object-fit: contain 이라 비율이 깨지지 않고 레터박스로 들어간다). */
@@ -2370,6 +2379,14 @@ function spacebioApplyOneScreenLayout() {
   const imuRow = document.querySelector('.sensor-grid');
   if (metrics && imuRow && metrics.previousElementSibling !== imuRow) {
     imuRow.parentNode.insertBefore(metrics, imuRow.nextSibling);
+  }
+
+  // 중력벡터 분포는 카메라 옆으로. 카메라를 절반 폭으로 줄여 그 자리를 만든다.
+  const sphere = document.getElementById('sphereDiv');
+  const camCard = document.querySelector('.cam-chart-row .cam-card');
+  const sphereCard = sphere && sphere.closest('.metric-paper');
+  if (sphereCard && camCard && sphereCard.previousElementSibling !== camCard) {
+    camCard.parentNode.insertBefore(sphereCard, camCard.nextSibling);
   }
 
   // 측정값 5행을 2열로 묶는다 — 세로로 나열하면 카드가 그만큼 길어진다.
