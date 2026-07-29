@@ -52,6 +52,35 @@ MAX_RECONNECT_ATTEMPTS = 5
 #: 타임아웃한다 — 한 번 실패로 FAULT 를 띄우면 운영자가 버튼을 여러 번 눌러야 한다.
 INITIAL_CONNECT_ATTEMPTS = 3
 
+#: 설정 패킷에서 Rref 와 함께 나가는 고정 파라미터. v2 펌웨어 config.h 값이며
+#: 원본 UI(`frontend_ble_web.py`)도 이 셋은 사용자에게 열지 않았다.
+FIXED_SAMPLING_RATE_HZ = 50
+FIXED_GAIN = 1.0
+FIXED_PGA = 8
+
+#: 시간평균 계수 상한. 원본 UI 와 같다.
+AVG_FACTOR_MAX = 200
+
+
+
+def _average(packets: list) -> dict:
+    """N개 패킷을 하나로 평균한다 (원본 frontend_ble_web.py 와 같은 규칙).
+
+    측정값은 산술평균, raw_adc 는 반올림 정수, 타임스탬프와 배터리는 **최신값**을
+    쓴다 — 시각을 평균하면 어느 시점의 값도 아니게 된다.
+    """
+    n = len(packets)
+    last = packets[-1]
+    mean = lambda key: sum(float(p[key]) for p in packets) / n
+    return {
+        "timestamp_ms": int(last["timestamp_ms"]),
+        "raw_adc": int(round(mean("raw_adc"))),
+        "resistance_ohm": mean("resistance_ohm"),
+        "delta_r_over_r0": mean("delta_r_over_r0"),
+        "temperature_c": mean("temperature_c"),
+        "battery_pct": int(last["battery_pct"]),
+    }
+
 
 @dataclass(frozen=True)
 class BleTarget:
@@ -98,11 +127,17 @@ class BleSensorSource:
         max_buffered: int = MAX_BUFFERED_SAMPLES,
         max_reconnects: int = MAX_RECONNECT_ATTEMPTS,
         initial_attempts: int = INITIAL_CONNECT_ATTEMPTS,
+        rref_ohm: Optional[float] = None,
+        avg_factor: int = 1,
     ) -> None:
         self._target = target or BleTarget()
         self._scan_timeout_s = scan_timeout_s
         self._max_reconnects = max_reconnects
         self._initial_attempts = max(1, initial_attempts)
+        #: None 이면 장치 설정을 건드리지 않는다(보드에 마지막으로 쓰인 값을 그대로 씀).
+        self._rref_ohm = rref_ohm
+        self._avg_factor = max(1, min(avg_factor, AVG_FACTOR_MAX))
+        self._avg_buf: list = []
         self._reconnects = 0
         self._client_factory = client_factory
         self._buffer: deque[SensorSample] = deque(maxlen=max_buffered)
@@ -178,6 +213,7 @@ class BleSensorSource:
                 return
 
             logger.info("BLE 센서 연결됨 (%s)", self._target.describe())
+            await self._apply_rref(client)
             failures = 0
             while True:
                 async for payload in client.stream():
@@ -204,6 +240,8 @@ class BleSensorSource:
                 if await client.connect(self._target, self._scan_timeout_s):
                     self._reconnects += 1
                     logger.info("BLE 센서 재연결됨 (%s)", self._target.describe())
+                    # 보드가 리셋됐을 수도 있으니 Rref 를 다시 적용한다.
+                    await self._apply_rref(client)
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001 — 어떤 실패든 tick()으로 알린다
@@ -235,8 +273,33 @@ class BleSensorSource:
             return self._client_factory()
         return _BleakClientAdapter()
 
+    async def _apply_rref(self, client: BleClient) -> None:
+        """레퍼런스 저항을 장치에 써 넣는다.
+
+        ⚠ 표시용 값이 아니다. 이걸 쓰면 펌웨어가 저항을 재계산하고 baseline 을
+        재설정한다. Rref 를 지정하지 않았으면 장치 설정을 건드리지 않는다 —
+        보드에 마지막으로 쓰인 값을 그대로 쓴다.
+        """
+        if self._rref_ohm is None:
+            return
+        writer = getattr(client, "write_config", None)
+        if writer is None:                      # 설정 쓰기를 지원하지 않는 클라이언트
+            return
+        try:
+            await writer(FIXED_SAMPLING_RATE_HZ, float(self._rref_ohm),
+                         FIXED_GAIN, FIXED_PGA)
+            logger.info("Rref %.0f Ω 적용 (baseline 재설정됨)", self._rref_ohm)
+        except Exception:  # noqa: BLE001 — 설정 실패가 수신을 막지는 않는다
+            logger.warning("Rref 적용 실패 — 보드의 기존 설정으로 계속한다",
+                           exc_info=True)
+
     def _to_sample(self, payload: bytes) -> Optional[SensorSample]:
-        """패킷 하나를 샘플로. 깨진 패킷은 버리고 스트림은 유지한다."""
+        """패킷 하나를 샘플로. 깨진 패킷은 버리고 스트림은 유지한다.
+
+        평균 계수가 1보다 크면 N개가 모일 때까지 None 을 돌려주고, 다 모이면
+        평균 한 개를 낸다(LCR 미터 방식). N개가 안 모인 채로는 내보내지 않는다 —
+        적은 표본을 평균이라고 기록하면 안 된다.
+        """
         try:
             parsed = parse_sensor_packet(payload)
         except BlePacketError as exc:
@@ -244,6 +307,13 @@ class BleSensorSource:
             logger.warning("dropping malformed BLE packet (%d dropped): %s",
                            self._dropped, exc)
             return None
+
+        if self._avg_factor > 1:
+            self._avg_buf.append(parsed)
+            if len(self._avg_buf) < self._avg_factor:
+                return None
+            parsed = _average(self._avg_buf)
+            self._avg_buf = []
 
         if self._first_timestamp_ms is None:
             self._first_timestamp_ms = parsed["timestamp_ms"]

@@ -49,6 +49,11 @@ class GatewayConfig:
     #: 센서를 여러 대 붙일 때만 `ble.address`로 특정한다.
     ble_device_name: Optional[str] = None
     ble_address: Optional[str] = None
+    #: 레퍼런스 저항(Ω). 장치에 써 넣는 설정이며 펌웨어가 저항을 재계산한다.
+    #: None 이면 보드의 기존 설정을 그대로 둔다.
+    ble_rref_ohm: Optional[float] = None
+    #: 시간평균 계수 — 원시 N개를 하나로 평균한다(출력 주파수 = fs/N).
+    ble_avg_factor: int = 1
     data_root: Path = Path("/home/aiworker-1/spacebio-data")
     flush_interval_s: float = 1.0
     flush_record_count: int = 100
@@ -95,6 +100,8 @@ def load_config(path: Path) -> GatewayConfig:
         sensor_serial_baudrate=int(sensor.get("serial_baudrate", 115200)),
         ble_device_name=ble.get("device_name") or None,
         ble_address=ble.get("address") or None,
+        ble_rref_ohm=(float(ble["rref_ohm"]) if ble.get("rref_ohm") is not None else None),
+        ble_avg_factor=int(ble.get("avg_factor", 1)),
         data_root=Path(store.get("data_root", "/home/aiworker-1/spacebio-data")),
         flush_interval_s=float(store.get("flush_interval_s", 1.0)),
         flush_record_count=int(store.get("flush_record_count", 100)),

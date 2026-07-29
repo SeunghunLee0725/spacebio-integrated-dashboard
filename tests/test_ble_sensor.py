@@ -476,3 +476,122 @@ async def test_explicit_address_takes_priority_over_cached():
     found = await _BleakClientAdapter._discover(
         scanner, BleTarget(address=b.address), 15.0, known_address=a.address)
     assert found is b
+
+
+# ═════════ 설정: 레퍼런스 저항(Rref) · 시간평균 계수 (기존 앱 기능 이식) ═════════
+#
+# 원본 frontend_ble_web.py 가 사용자에게 열어둔 설정은 이 둘뿐이다.
+#   Rref  : BLE 설정 특성(...90AD)에 써 넣으면 펌웨어가 저항을 재계산하고
+#           baseline 을 재설정한다. 표시용 값이 아니라 **장치 설정**이다.
+#   평균N : 원시 N개를 하나로 평균(LCR 미터 방식). 출력 주파수가 fs/N 로 떨어진다.
+
+from gateway.ble_packet import (
+    CONFIG_PACKET_FORMAT, CONFIG_PACKET_SIZE, build_config_packet,
+)
+
+
+def test_config_packet_matches_firmware_layout():
+    """펌웨어 ble_service.h 의 ConfigPacket 은 <HffB 11바이트다."""
+    assert CONFIG_PACKET_FORMAT == "<HffB"
+    assert CONFIG_PACKET_SIZE == 11
+    raw = build_config_packet(50, 10_000.0, 1.0, 8)
+    assert len(raw) == CONFIG_PACKET_SIZE
+    assert struct.unpack(CONFIG_PACKET_FORMAT, raw) == (50, 10_000.0, 1.0, 8)
+
+
+@pytest.mark.parametrize("rref", [99.0, 0.0, -1.0, 1_000_001.0])
+def test_config_packet_rejects_rref_out_of_range(rref):
+    """원본 UI 의 허용 범위는 100 ~ 1,000,000 Ω 이다."""
+    with pytest.raises(BlePacketError):
+        build_config_packet(50, rref, 1.0, 8)
+
+
+@pytest.mark.parametrize("pga", [3, 5, 7, 32])
+def test_config_packet_rejects_invalid_pga(pga):
+    with pytest.raises(BlePacketError):
+        build_config_packet(50, 10_000.0, 1.0, pga)
+
+
+class ConfigCapturingClient(FakeBleClient):
+    """write_config 호출을 기록하는 가짜 클라이언트."""
+
+    def __init__(self, packets):
+        super().__init__(packets)
+        self.configs = []
+
+    async def write_config(self, sampling_rate_hz, rref_ohm, gain, pga):
+        self.configs.append((sampling_rate_hz, rref_ohm, gain, pga))
+
+
+@pytest.mark.asyncio
+async def test_rref_is_pushed_to_the_device_on_connect():
+    """Rref 는 화면 값이 아니라 장치 설정이다 — 붙자마자 밀어 넣어야 한다."""
+    client = ConfigCapturingClient([_packet()])
+    src = BleSensorSource(target=BleTarget(), client_factory=lambda: client,
+                          rref_ohm=47_000.0)
+    src.start()
+    await _drain(src, 1)
+    await src.aclose()
+
+    assert client.configs, "연결 후 설정 패킷을 보내지 않았다"
+    rate, rref, gain, pga = client.configs[0]
+    assert rref == 47_000.0
+    assert (rate, gain, pga) == (50, 1.0, 8), "고정 파라미터는 펌웨어 값과 같아야 한다"
+
+
+@pytest.mark.asyncio
+async def test_no_config_write_when_rref_not_set():
+    """Rref 를 지정하지 않으면 장치 설정을 건드리지 않는다."""
+    client = ConfigCapturingClient([_packet()])
+    src = BleSensorSource(target=BleTarget(), client_factory=lambda: client)
+    src.start()
+    await _drain(src, 1)
+    await src.aclose()
+    assert client.configs == []
+
+
+@pytest.mark.asyncio
+async def test_average_factor_combines_n_packets_into_one():
+    """N개를 평균해 1개를 낸다. 저항·ΔR/R0·온도는 평균, 타임스탬프는 최신."""
+    packets = [
+        _packet(timestamp_ms=100, raw_adc=10, resistance_ohm=1000.0, temperature_c=20.0),
+        _packet(timestamp_ms=200, raw_adc=20, resistance_ohm=2000.0, temperature_c=22.0),
+        _packet(timestamp_ms=300, raw_adc=30, resistance_ohm=3000.0, temperature_c=24.0),
+    ]
+    src = BleSensorSource(target=BleTarget(),
+                          client_factory=lambda: FakeBleClient(packets),
+                          avg_factor=3)
+    src.start()
+    samples = await _drain(src, 1)
+    await src.aclose()
+
+    assert len(samples) == 1, "3개가 1개로 합쳐져야 한다"
+    s = samples[0]
+    assert s.source_timestamp_ms == 300          # 최신 타임스탬프
+    assert abs(s.resistance_ohm - 2000.0) < 1e-6
+    assert abs(s.temperature_c - 22.0) < 1e-4
+    assert s.raw_adc == 20                        # 반올림 정수
+
+
+@pytest.mark.asyncio
+async def test_average_factor_one_is_passthrough():
+    packets = [_packet(timestamp_ms=t) for t in (10, 20)]
+    src = BleSensorSource(target=BleTarget(),
+                          client_factory=lambda: FakeBleClient(packets),
+                          avg_factor=1)
+    src.start()
+    samples = await _drain(src, 2)
+    await src.aclose()
+    assert [s.source_timestamp_ms for s in samples] == [10, 20]
+
+
+@pytest.mark.asyncio
+async def test_partial_average_bucket_is_not_emitted():
+    """N개가 안 모이면 내보내지 않는다 — 적은 표본을 평균이라 부르면 안 된다."""
+    src = BleSensorSource(target=BleTarget(),
+                          client_factory=lambda: FakeBleClient([_packet(), _packet()]),
+                          avg_factor=5)
+    src.start()
+    await asyncio.sleep(0.1)
+    assert src.tick() is None
+    await src.aclose()

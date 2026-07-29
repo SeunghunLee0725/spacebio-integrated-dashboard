@@ -125,6 +125,9 @@ class GatewayRuntime:
         self._sensor_mode: Optional[SensorMode] = None
         self._sensor_source: Optional[Any] = None
         self._sensor_sample: Optional[SensorSample] = None
+        #: BLE 모드에서 실제로 적용 중인 설정 (화면 표시용)
+        self._sensor_rref_ohm: Optional[float] = None
+        self._sensor_avg_factor: Optional[int] = None
         self._sensor_task: Optional[asyncio.Task[None]] = None
         #: 진행 중인 하드웨어 해제. 정지 응답을 막지 않으려고 백그라운드로 돌리고,
         #: 다음 start/configure가 이것을 기다린다.
@@ -239,8 +242,11 @@ class GatewayRuntime:
     # ─────────────────────────── 센서 ───────────────────────────
 
     def _sensor_status_locked(self) -> SensorStatus:
+        ble = self._sensor_mode == SensorMode.BLE_LIVE
         return SensorStatus(
             state=self._sensor_state, mode=self._sensor_mode, sample=self._sensor_sample,
+            rref_ohm=self._sensor_rref_ohm if ble else None,
+            avg_factor=self._sensor_avg_factor if ble else None,
         )
 
     def list_datasets(self) -> list[dict[str, Any]]:
@@ -284,7 +290,17 @@ class GatewayRuntime:
                         name=request.device_name or self._config.ble_device_name,
                     ),
                     scan_timeout_s=request.scan_timeout_s,
+                    # 요청에 없으면 config.yaml 값을 쓴다. Rref 가 끝내 None 이면
+                    # 장치 설정을 건드리지 않는다(보드의 기존 값 유지).
+                    rref_ohm=(request.rref_ohm if request.rref_ohm is not None
+                              else self._config.ble_rref_ohm),
+                    avg_factor=(request.avg_factor if request.avg_factor is not None
+                                else self._config.ble_avg_factor),
                 )
+                self._sensor_rref_ohm = (request.rref_ohm if request.rref_ohm is not None
+                                         else self._config.ble_rref_ohm)
+                self._sensor_avg_factor = (request.avg_factor if request.avg_factor is not None
+                                           else self._config.ble_avg_factor)
                 mode = SensorMode.BLE_LIVE
             else:
                 source = SyntheticSensorSource(

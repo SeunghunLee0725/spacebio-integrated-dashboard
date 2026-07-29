@@ -88,6 +88,7 @@ NEW_IDS = [
     "pumpStepCount", "pumpStepSpm", "pumpSendSteps", "pumpPositionSteps",
     "spacebioJumpLink", "resistanceModeBadge", "spacebioSubtitle",
     "spacebioRecordingHint", "spacebioDataPath", "spacebioStorageHint",
+    "resistanceRref", "resistanceAvgFactor", "resistanceSettingHint",
 ]
 
 
@@ -323,3 +324,36 @@ def test_panel_shows_where_data_is_saved(work):
     assert "session.data_dir" in work
     assert "sensor_samples.csv" in work
     assert "/home/aiworker-1" not in work, "화면이 파이 경로를 하드코딩하면 안 된다"
+
+
+# ───── 저항 측정 설정: Rref · 시간평균 (기존 앱 기능 이식, 2026-07-29) ─────
+
+
+def test_rref_and_avg_inputs_exist_with_original_ranges(work):
+    """원본 frontend_ble_web.py 의 허용 범위와 같아야 한다."""
+    assert 'id="resistanceRref"' in work
+    assert 'min="100"' in work and 'max="1000000"' in work
+    assert 'id="resistanceAvgFactor"' in work
+    assert 'max="200"' in work
+
+
+def test_configure_sends_rref_and_avg_factor(work):
+    start = work.index("async function spacebioConfigureSensor")
+    section = work[start:work.index(chr(10) + "}", start)]
+    assert "rref_ohm" in section and "avg_factor" in section
+    assert "100" in section and "1000000" in section, "범위 밖 값을 보내면 422 가 난다"
+
+
+def test_settings_are_locked_while_measuring(work):
+    """Rref 를 바꾸면 펌웨어가 baseline 을 재설정한다 — 측정 중 변경은 기록을
+    불연속하게 만든다."""
+    start = work.index("function spacebioSyncActionButtons")
+    section = work[start:work.index(chr(10) + "}", start)]
+    assert "resistanceRref" in section and "resistanceAvgFactor" in section
+    assert "measuring" in section
+
+
+def test_panel_reflects_server_applied_settings(work):
+    """화면이 자기가 보낸 값을 되뇌지 않고 서버가 쓰는 값을 보여줘야 한다."""
+    assert "sensorStatus.rref_ohm" in work
+    assert "sensorStatus.avg_factor" in work

@@ -194,6 +194,12 @@ class SensorConfigureBleLiveRequest(_Request):
     #: 보조 필터 — 같은 서비스를 광고하는 장치가 여럿일 때만 의미가 있다.
     device_name: Optional[Annotated[str, Field(min_length=1, max_length=64)]] = None
     scan_timeout_s: Annotated[float, Field(gt=0.0, le=120.0)] = 15.0
+    #: 레퍼런스 저항(Ω). **장치 설정이다** — 보드에 써 넣으면 펌웨어가 저항을
+    #: 다시 계산하고 baseline 을 재설정한다. 비우면 config.yaml 값, 그것도 없으면
+    #: 보드에 마지막으로 쓰인 값을 그대로 쓴다(장치 설정을 건드리지 않음).
+    rref_ohm: Optional[Annotated[float, Field(ge=100.0, le=1_000_000.0)]] = None
+    #: 시간평균 계수. 원시 N개를 하나로 평균한다(출력 주파수 = fs/N).
+    avg_factor: Optional[Annotated[int, Field(ge=1, le=200)]] = None
 
 
 SensorConfigureRequest = Annotated[
@@ -347,6 +353,10 @@ class SensorStatus(_Status):
     state: SensorState = SensorState.IDLE
     mode: Optional[SensorMode] = None
     sample: Optional[SensorSample] = None
+    #: 실기 BLE 모드에서 실제로 적용 중인 설정. 화면이 자기가 보낸 값을 되뇌지 않고
+    #: 서버가 쓰고 있는 값을 그대로 보여주도록 여기서 알려준다.
+    rref_ohm: Optional[float] = None
+    avg_factor: Optional[int] = None
 
 
 #: 무선 실기 펌프 백엔드가 붙었을 때의 mode 값.

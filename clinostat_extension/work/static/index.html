@@ -1774,6 +1774,15 @@ window.addEventListener('resize', scheduleCameraResize);
       <div class="sb-row"><span>연결</span><span>BLE 무선 (ResistanceSensor)</span></div>
       <label for="spacebioExperimentName">실험명</label>
       <input id="spacebioExperimentName" type="text" value="resistance-run">
+
+      <!-- 기존 앱(frontend_ble_web.py)이 열어두던 설정 둘. 나머지 파라미터
+           (sampling 50 Hz, gain 1, PGA 8)는 펌웨어 고정값이라 열지 않는다. -->
+      <label for="resistanceRref">레퍼런스 저항 Rref (Ω)</label>
+      <input id="resistanceRref" type="number" value="10000" min="100" max="1000000" step="100">
+      <label for="resistanceAvgFactor">시간평균 계수 N (1 = 평균 안 함)</label>
+      <input id="resistanceAvgFactor" type="number" value="1" min="1" max="200" step="1">
+      <div class="sb-hint" id="resistanceSettingHint"></div>
+
       <button id="resistanceStart">측정 시작</button>
       <button id="resistanceStop">측정 정지</button>
       <div class="sb-hint" id="spacebioRecordingHint"></div>
@@ -1930,6 +1939,10 @@ function spacebioSyncActionButtons() {
   sbEl('resistanceStart').disabled = measuring;
   sbEl('resistanceStop').disabled = !measuring;
   sbEl('spacebioExperimentName').disabled = measuring;   // 측정 중 실험명 변경 금지
+  // Rref는 장치 설정이라 바꾸면 펌웨어가 baseline을 재설정한다 — 측정 중 변경은
+  // 기록을 불연속하게 만들므로 잠근다. 평균 계수도 같은 이유로 구간마다 고정한다.
+  sbEl('resistanceRref').disabled = measuring;
+  sbEl('resistanceAvgFactor').disabled = measuring;
 
   const hint = sbEl('spacebioRecordingHint');
   hint.classList.remove('warn');
@@ -1983,10 +1996,18 @@ async function spacebioResetEstop() {
 }
 
 async function spacebioConfigureSensor() {
-  // 화면은 실기 BLE 센서 전용이다. 설정 파라미터가 없으므로 {mode}만 보낸다
-  // (device_name/scan_timeout_s는 생략하면 config.yaml의 ble.* 값을 쓴다).
-  await spacebioFetch('/api/spacebio/sensor/configure',
-                      { method: 'POST', body: { mode: 'BLE_LIVE' } });
+  // 화면은 실기 BLE 센서 전용이다. device_name/scan_timeout_s는 생략하면
+  // config.yaml의 ble.* 값을 쓴다.
+  //
+  // ⚠ Rref는 표시용 값이 아니라 **장치 설정**이다. 서버가 BLE 설정 특성에 써 넣고
+  //   펌웨어가 저항을 재계산하며 baseline을 재설정한다. 그래서 측정 중에는
+  //   바꾸지 못하게 막는다(기록이 불연속해진다).
+  const body = { mode: 'BLE_LIVE' };
+  const rref = Number(sbEl('resistanceRref').value);
+  const avg = Number(sbEl('resistanceAvgFactor').value);
+  if (Number.isFinite(rref) && rref >= 100 && rref <= 1000000) body.rref_ohm = rref;
+  if (Number.isFinite(avg) && avg >= 1 && avg <= 200) body.avg_factor = Math.round(avg);
+  await spacebioFetch('/api/spacebio/sensor/configure', { method: 'POST', body });
 }
 
 function spacebioRenderStatus(status) {
@@ -1999,8 +2020,23 @@ function spacebioRenderStatus(status) {
   sbEl('spacebioSessionId').textContent = session.session_id || '-';
   sbEl('spacebioSessionRecordingState').textContent = session.state || 'idle';
   spacebioSessionState = session.state || 'idle';
-  spacebioSensorState = (status.sensor || {}).state || 'idle';
+  const sensorStatus = status.sensor || {};
+  spacebioSensorState = sensorStatus.state || 'idle';
   spacebioSyncActionButtons();
+
+  // 서버가 실제로 적용 중인 설정을 되비춘다 — 화면이 자기가 보낸 값을 되뇌지 않는다.
+  const settingHint = sbEl('resistanceSettingHint');
+  if (sensorStatus.rref_ohm != null || sensorStatus.avg_factor != null) {
+    const n = sensorStatus.avg_factor || 1;
+    const rate = n > 1 ? (36 / n).toFixed(1) : '36';
+    settingHint.textContent = '적용 중 · Rref '
+      + (sensorStatus.rref_ohm != null
+          ? (sensorStatus.rref_ohm / 1000).toFixed(3) + ' kΩ' : '(보드 기존값)')
+      + ' · 평균 N=' + n + ' → 약 ' + rate + ' Hz 기록';
+  } else {
+    settingHint.textContent = 'Rref는 보드에 기록되어 저항 계산과 baseline에 쓰입니다. '
+      + '평균 N을 올리면 잡음과 용량이 함께 줄어듭니다.';
+  }
 
   // 저항 값이 어디에 쌓이는지. 경로는 서버가 알려준다(화면이 하드코딩하지 않는다).
   sbEl('spacebioDataPath').textContent = session.data_dir

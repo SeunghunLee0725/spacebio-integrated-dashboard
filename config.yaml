@@ -19,6 +19,13 @@ loop:
 ble:
   source: simulated      # simulated | bleak   (센서 노드 연결 시 bleak)
   device_name: ResistanceSensor
+  # ⚠ 탐색은 서비스 UUID로 한다 — device_name은 보조 필터일 뿐이다.
+  #   레퍼런스 저항: 장치에 써 넣는 설정이며, 쓰면 펌웨어가 저항을 재계산하고
+  #   baseline을 재설정한다. 원본 앱(20260331_LOC_SYLee)의 기본값과 같은 10 kΩ.
+  #   비우면 보드에 마지막으로 쓰인 값을 그대로 쓴다.
+  rref_ohm: 10000
+  # 시간평균 계수 — 원시 N개를 하나로 평균한다(출력 주파수 = fs/N). 1이면 평균 안 함.
+  avg_factor: 1
 
 store:
   db_path: ./data/gateway.sqlite

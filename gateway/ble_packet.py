@@ -28,6 +28,16 @@ from typing import Any, Dict
 SENSOR_PACKET_FORMAT: str = "<IifffB"
 SENSOR_PACKET_SIZE: int = struct.calcsize(SENSOR_PACKET_FORMAT)  # 21
 
+#: 설정 특성(...90AD)에 쓰는 패킷. 펌웨어 `ble_service.h` 의 ConfigPacket 과 같다.
+#:   uint16_t sampling_rate_hz / float rref_ohm / float gain / uint8_t pga_setting
+CONFIG_PACKET_FORMAT: str = "<HffB"
+CONFIG_PACKET_SIZE: int = struct.calcsize(CONFIG_PACKET_FORMAT)  # 11
+
+#: 원본 UI(`frontend_ble_web.py`)가 허용하던 레퍼런스 저항 범위.
+RREF_MIN_OHM, RREF_MAX_OHM = 100.0, 1_000_000.0
+#: ADS1115 PGA 설정값. 이 외의 값은 펌웨어가 해석하지 못한다.
+VALID_PGA = (0, 1, 2, 4, 8, 16)
+
 
 class BlePacketError(ValueError):
     """패킷 길이·값이 계약을 벗어났다. 해당 패킷만 버리고 스트림은 유지한다."""
@@ -75,3 +85,32 @@ def parse_sensor_packet(data: bytes) -> Dict[str, Any]:
         "temperature_c": float(temperature_c),
         "battery_pct": int(battery_pct),
     }
+
+
+def build_config_packet(
+    sampling_rate_hz: int,
+    rref_ohm: float,
+    gain: float,
+    pga_setting: int,
+) -> bytes:
+    """설정 특성에 쓸 11바이트를 만든다.
+
+    ⚠ 이 패킷을 쓰면 **펌웨어가 저항을 다시 계산하고 baseline 을 재설정한다.**
+    화면 표시용 값이 아니라 장치 설정이므로, 측정 중에 바꾸면 데이터가 불연속해진다.
+    """
+    if not 1 <= sampling_rate_hz <= 860:
+        raise BlePacketError(f"sampling_rate_hz must be 1-860: {sampling_rate_hz}")
+    if not RREF_MIN_OHM <= rref_ohm <= RREF_MAX_OHM:
+        raise BlePacketError(
+            f"rref_ohm must be {RREF_MIN_OHM:.0f}-{RREF_MAX_OHM:.0f} ohm: {rref_ohm}"
+        )
+    if not 1.0 <= gain <= 10_000.0:
+        raise BlePacketError(f"gain must be 1.0-10000.0: {gain}")
+    if pga_setting not in VALID_PGA:
+        raise BlePacketError(f"pga_setting must be one of {VALID_PGA}: {pga_setting}")
+
+    try:
+        return struct.pack(CONFIG_PACKET_FORMAT,
+                           sampling_rate_hz, rref_ohm, gain, pga_setting)
+    except struct.error as exc:
+        raise BlePacketError(f"cannot pack config packet: {exc}") from exc
