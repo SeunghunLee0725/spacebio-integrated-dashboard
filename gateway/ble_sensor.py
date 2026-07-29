@@ -48,6 +48,10 @@ MAX_BUFFERED_SAMPLES = 2048
 #: 한 번 끊겼다고 바로 오류로 올리지 않는다. 연속 실패가 이 값을 넘으면 FAULT.
 MAX_RECONNECT_ATTEMPTS = 5
 
+#: 첫 연결 시도 횟수. BlueZ 는 연결/해제를 반복하면 다음 connect() 가 간헐적으로
+#: 타임아웃한다 — 한 번 실패로 FAULT 를 띄우면 운영자가 버튼을 여러 번 눌러야 한다.
+INITIAL_CONNECT_ATTEMPTS = 3
+
 
 @dataclass(frozen=True)
 class BleTarget:
@@ -93,10 +97,12 @@ class BleSensorSource:
         client_factory: Optional[Callable[[], BleClient]] = None,
         max_buffered: int = MAX_BUFFERED_SAMPLES,
         max_reconnects: int = MAX_RECONNECT_ATTEMPTS,
+        initial_attempts: int = INITIAL_CONNECT_ATTEMPTS,
     ) -> None:
         self._target = target or BleTarget()
         self._scan_timeout_s = scan_timeout_s
         self._max_reconnects = max_reconnects
+        self._initial_attempts = max(1, initial_attempts)
         self._reconnects = 0
         self._client_factory = client_factory
         self._buffer: deque[SensorSample] = deque(maxlen=max_buffered)
@@ -159,10 +165,14 @@ class BleSensorSource:
             client = self._make_client()
             self._client = client
 
-            if not await client.connect(self._target, self._scan_timeout_s):
+            # 첫 연결도 재시도한다. BlueZ 는 연결/해제를 반복하면 다음 connect() 가
+            # 간헐적으로 타임아웃한다(2026-07-29 실기: 재시작 직후엔 1회에 붙고,
+            # 몇 번 돌린 뒤엔 실패). 한 번 실패했다고 FAULT 로 올리면 운영자가
+            # 측정 시작을 여러 번 눌러야 한다.
+            if not await self._connect_with_retry(client):
                 self._error = (
                     f"BLE device not found ({self._target.describe()}, "
-                    f"scanned {self._scan_timeout_s:.0f}s) — 전원과 광고 상태를 확인하세요"
+                    f"{self._initial_attempts}회 시도) — 전원과 광고 상태를 확인하세요"
                 )
                 logger.warning("%s", self._error)
                 return
@@ -199,6 +209,26 @@ class BleSensorSource:
         except Exception as exc:  # noqa: BLE001 — 어떤 실패든 tick()으로 알린다
             self._error = f"BLE stream failed ({self._target.describe()}): {exc}"
             logger.exception("BLE 수신 실패")
+
+    async def _connect_with_retry(self, client: BleClient) -> bool:
+        """연결될 때까지 몇 번 시도한다. 실패는 예외가 아니라 False 로도 온다."""
+        for attempt in range(1, self._initial_attempts + 1):
+            try:
+                if await client.connect(self._target, self._scan_timeout_s):
+                    return True
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001 — 타임아웃도 재시도 대상이다
+                logger.warning("BLE 연결 시도 %d/%d 실패: %s",
+                               attempt, self._initial_attempts, exc)
+            else:
+                logger.warning("BLE 연결 시도 %d/%d — 장치를 찾지 못함",
+                               attempt, self._initial_attempts)
+            if attempt < self._initial_attempts:
+                await asyncio.sleep(2.0)
+                with contextlib.suppress(Exception):
+                    await client.disconnect()   # BlueZ 쪽 잔여 상태를 정리한다
+        return False
 
     def _make_client(self) -> BleClient:
         if self._client_factory is not None:

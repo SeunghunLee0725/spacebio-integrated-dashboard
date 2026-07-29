@@ -184,6 +184,7 @@ async def test_connect_failure_is_reported_through_tick():
     src = BleSensorSource(
         target=BleTarget(name="Missing"),
         client_factory=lambda: FakeBleClient([], fail_connect=True),
+        initial_attempts=1,          # 재시도 없이 바로 실패시켜 검증한다
     )
     src.start()
     await asyncio.sleep(0.05)
@@ -367,9 +368,78 @@ async def test_gives_up_after_max_reconnects_and_reports_error():
 async def test_first_connect_failure_is_not_treated_as_reconnect():
     """처음부터 못 붙은 것은 '장치 없음'이지 '끊김'이 아니다 — 메시지가 달라야 한다."""
     src = BleSensorSource(target=BleTarget(name="Missing"),
-                          client_factory=lambda: FakeBleClient([], fail_connect=True))
+                          client_factory=lambda: FakeBleClient([], fail_connect=True),
+                          initial_attempts=1)
     src.start()
     await asyncio.sleep(0.05)
     with pytest.raises(SensorSourceError, match="not found"):
         src.tick()
     await src.aclose()
+
+
+# ───────── 첫 연결 재시도 (BlueZ 간헐 타임아웃 대응, 2026-07-29 실기) ─────────
+
+
+class FlakyFirstConnect:
+    """처음 N번은 실패하고 그 뒤에 붙는 클라이언트."""
+
+    def __init__(self, fail_times: int, *, raise_instead=False):
+        self._left = fail_times
+        self._raise = raise_instead
+        self.attempts = 0
+
+    async def connect(self, target, timeout: float) -> bool:
+        self.attempts += 1
+        if self._left > 0:
+            self._left -= 1
+            if self._raise:
+                raise TimeoutError()
+            return False
+        return True
+
+    async def stream(self):
+        yield _packet(timestamp_ms=5)
+
+    async def disconnect(self) -> None: ...
+
+
+@pytest.mark.asyncio
+async def test_retries_first_connect_before_giving_up():
+    client = FlakyFirstConnect(fail_times=2)
+    src = BleSensorSource(target=BleTarget(), client_factory=lambda: client,
+                          initial_attempts=3)
+    src.start()
+    samples = await _drain(src, 1, timeout=12.0)
+    await src.aclose()
+
+    assert client.attempts == 3
+    assert len(samples) == 1
+
+
+@pytest.mark.asyncio
+async def test_connect_timeout_is_retried_not_fatal():
+    """BlueZ 는 실패를 False 가 아니라 TimeoutError 로도 낸다."""
+    client = FlakyFirstConnect(fail_times=1, raise_instead=True)
+    src = BleSensorSource(target=BleTarget(), client_factory=lambda: client,
+                          initial_attempts=3)
+    src.start()
+    samples = await _drain(src, 1, timeout=12.0)
+    await src.aclose()
+
+    assert len(samples) == 1
+
+
+@pytest.mark.asyncio
+async def test_gives_up_after_initial_attempts_exhausted():
+    client = FlakyFirstConnect(fail_times=99)
+    src = BleSensorSource(target=BleTarget(), client_factory=lambda: client,
+                          initial_attempts=2)
+    src.start()
+    for _ in range(200):
+        await asyncio.sleep(0.05)
+        if src._error is not None:
+            break
+    with pytest.raises(SensorSourceError, match="2회 시도"):
+        src.tick()
+    await src.aclose()
+    assert client.attempts == 2
