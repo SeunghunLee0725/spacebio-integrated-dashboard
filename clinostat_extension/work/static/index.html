@@ -2294,6 +2294,13 @@ document.addEventListener('DOMContentLoaded', spacebioInit);
   /* 중력벡터 분포는 Plotly 다. #sphereDiv 의 min-height:240px 이 카드보다 커서
      넘쳤다 — 풀어 주면 responsive:true 가 알아서 다시 그린다. */
   #sphereDiv { min-height: 0 !important; }
+  /* Chart.js 는 maintainAspectRatio 로 캔버스를 폭에 비례해 키운다. 카드를 줄이면
+     본문(170px)보다 캔버스(225px)가 커져 넘친다(실측 44·59px). 카드 높이에 묶는다.
+     Chart.js 가 style 로 높이를 쓰므로 !important 가 필요하다. */
+  .metrics-grid .metric-paper .body canvas {
+    height: 100% !important;
+    max-height: 100% !important;
+  }
   .metrics-grid .metric-paper h4 {
     font-size: 0.72em !important;
     margin-bottom: 4px !important;
@@ -2406,6 +2413,12 @@ document.addEventListener('DOMContentLoaded', () => {
     if (window.Plotly) {
       document.querySelectorAll('.js-plotly-plot')
         .forEach((el) => { try { Plotly.Plots.resize(el); } catch (e) { /* 무시 */ } });
+    }
+    if (window.Chart && Chart.getChart) {
+      document.querySelectorAll('canvas').forEach((cv) => {
+        const chart = Chart.getChart(cv);
+        if (chart) { try { chart.resize(); } catch (e) { /* 무시 */ } }
+      });
     }
   };
   nudgeCharts();

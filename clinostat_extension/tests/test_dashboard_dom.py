@@ -493,3 +493,16 @@ def test_metric_cards_clip_overflow(work):
 def test_plotly_is_resized_explicitly(work):
     """Plotly 는 resize 이벤트만으로 안 따라오는 경우가 있다."""
     assert "Plotly.Plots.resize" in work
+
+
+def test_chartjs_canvas_is_bound_to_card_height(work):
+    """Chart.js 는 maintainAspectRatio 로 캔버스를 폭에 비례해 키운다. 카드를 줄이면
+    본문(170px)보다 캔버스(225px)가 커져 넘친다(실측 44·59px)."""
+    wide = work[work.index("@media (min-width: 1600px)"):]
+    wide = wide[:wide.index(chr(10) + "}")]
+    assert ".metrics-grid .metric-paper .body canvas" in wide
+    assert "max-height: 100% !important" in wide
+
+
+def test_chartjs_is_resized_explicitly(work):
+    assert "Chart.getChart(cv)" in work
