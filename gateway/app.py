@@ -28,6 +28,7 @@ from gateway.http_support import request_id as extract_request_id
 from gateway.routes import router
 from gateway.runtime import GatewayConfig, GatewayRuntime, SensorConflictError, load_config
 from gateway.sensor_source import SensorSourceError
+from gateway.session_archive import ArchiveConflictError, ArchiveNotFoundError
 from gateway.session_store import (
     InsufficientSpaceError,
     SessionConflictError,
@@ -85,6 +86,11 @@ async def _handle_conflict(request: Request, exc: Exception) -> JSONResponse:
     return _error_response(request, 409, code, str(exc))
 
 
+async def _handle_not_found(request: Request, exc: Exception) -> JSONResponse:
+    """없는 세션. 경로 검증 실패도 여기로 온다 — 존재 여부를 구분해 흘리지 않는다."""
+    return _error_response(request, 404, "not_found", str(exc))
+
+
 async def _handle_device_fault(request: Request, exc: Exception) -> JSONResponse:
     return _error_response(request, 503, "device_fault", str(exc))
 
@@ -104,6 +110,9 @@ def _register_exception_handlers(app: FastAPI) -> None:
     app.add_exception_handler(SessionConflictError, _handle_conflict)
     app.add_exception_handler(SessionNotActiveError, _handle_conflict)
     app.add_exception_handler(InsufficientSpaceError, _handle_conflict)
+    app.add_exception_handler(ArchiveConflictError, _handle_conflict)
+
+    app.add_exception_handler(ArchiveNotFoundError, _handle_not_found)
 
     app.add_exception_handler(PumpFaultError, _handle_device_fault)
     app.add_exception_handler(SessionIoError, _handle_device_fault)

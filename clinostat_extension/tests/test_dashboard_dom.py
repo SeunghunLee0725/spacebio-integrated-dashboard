@@ -539,3 +539,36 @@ def test_event_card_sits_next_to_the_sensor_card(work):
     start = work.index("function spacebioApplyOneScreenLayout")
     section = work[start:work.index(chr(10) + "}", start)]
     assert "sbGrid.appendChild(eventCard)" in section
+
+
+def test_archive_card_is_mounted_next_to_the_resistance_chart(work):
+    """기록 관리 카드는 저항 추이 아래에 붙는다."""
+    assert "id = 'spacebioArchive'" in work
+    assert "chartCard.parentNode.insertBefore(card, chartCard.nextSibling)" in work
+
+
+def test_archive_calls_only_proxied_endpoints(work):
+    """브라우저는 게이트웨이(8010)에 직접 가지 않는다 — 프록시 경로만 쓴다."""
+    assert "const LIST_URL = '/api/spacebio/sessions';" in work
+    assert "127.0.0.1:8010" not in work
+    assert "8010" not in work
+
+
+def test_archive_delete_needs_two_clicks(work):
+    """삭제는 비가역이다 — 한 번의 오클릭으로 지워지면 안 된다."""
+    assert "remove.dataset.stage = 'armed'" in work
+    assert "'정말 삭제?'" in work
+    # 모달(window.confirm)은 다른 자동화를 멈춰 세운다. 호출하지 않는다.
+    assert not re.search(r"(?<![.\w])confirm\s*\(", work.replace("confirm() 대신", ""))
+
+
+def test_archive_explains_why_an_active_session_cannot_be_deleted(work):
+    """409를 그냥 '실패'로 보여주면 사용자가 원인을 모른다."""
+    assert "session_active" in work
+    assert "측정을 먼저 정지하세요" in work
+
+
+def test_archive_encodes_the_session_id_in_urls(work):
+    """세션 ID를 그대로 이어붙이지 않는다."""
+    assert "encodeURIComponent(session.session_id)" in work
+    assert "encodeURIComponent(sessionId)" in work

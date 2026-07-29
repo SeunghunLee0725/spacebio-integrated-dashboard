@@ -1042,6 +1042,69 @@ async def spacebio_sensor_datasets(request: Request):
     return await _spacebio_relay(request, "/api/spacebio/sensor/datasets")
 
 
+# ─── 기록 관리 (목록·다운로드·삭제) ────────────────────────────────────────
+# 다운로드만 envelope가 아니다 — Gateway가 낸 .tar.gz 를 그대로 흘려보낸다.
+
+@app.get("/api/spacebio/sessions")
+async def spacebio_sessions(request: Request):
+    return await _spacebio_relay(request, "/api/spacebio/sessions")
+
+
+@app.get("/api/spacebio/sessions/{session_id}/download")
+async def spacebio_session_download(request: Request, session_id: str):
+    request_id = _spacebio_request_id(request)
+    proxy = request.app.state.spacebio
+    try:
+        stream_cm = proxy.open_archive(session_id, request_id)
+        archive = await stream_cm.__aenter__()
+    except ProxyPathError:
+        return JSONResponse(
+            status_code=404,
+            content=_spacebio_envelope_error(request_id, "not_proxied", "unknown session"),
+        )
+    except ProxyGatewayError as exc:
+        return JSONResponse(
+            status_code=exc.status_code,
+            content=_spacebio_envelope_error(
+                request_id, exc.error.get("code", "gateway_error"),
+                exc.error.get("message", ""),
+            ),
+        )
+
+    async def _body():
+        try:
+            async for chunk in archive.chunks:
+                yield chunk
+        finally:
+            await stream_cm.__aexit__(None, None, None)
+
+    return StreamingResponse(
+        _body(), media_type=archive.media_type, headers=dict(archive.headers),
+    )
+
+
+@app.delete("/api/spacebio/sessions/{session_id}")
+async def spacebio_session_delete(request: Request, session_id: str):
+    """비가역이다. 기록 중인 세션은 Gateway가 409로 거부한다."""
+    request_id = _spacebio_request_id(request)
+    proxy = request.app.state.spacebio
+    try:
+        return await proxy.delete_session(session_id, request_id)
+    except ProxyPathError:
+        return JSONResponse(
+            status_code=404,
+            content=_spacebio_envelope_error(request_id, "not_proxied", "unknown session"),
+        )
+    except ProxyGatewayError as exc:
+        return JSONResponse(
+            status_code=exc.status_code,
+            content=_spacebio_envelope_error(
+                request_id, exc.error.get("code", "gateway_error"),
+                exc.error.get("message", ""),
+            ),
+        )
+
+
 @app.get("/api/spacebio/session/status")
 async def spacebio_session_status(request: Request):
     return await _spacebio_relay(request, "/api/spacebio/session/status")

@@ -19,7 +19,7 @@ import itertools
 import logging
 import time
 from pathlib import Path
-from typing import Any, AsyncIterator, Optional, Union
+from typing import IO, Any, AsyncIterator, Optional, Union
 
 from gateway.api_models import (
     GatewayComponent,
@@ -58,6 +58,12 @@ from gateway.session_store import (
     SessionNotActiveError,
     SessionSnapshot,
     SessionStore,
+)
+from gateway.session_archive import (
+    ArchivedSession,
+    delete_session,
+    list_sessions,
+    open_archive,
 )
 from gateway.runtime_config import GatewayConfig, load_config
 from gateway.mqtt_pump import MqttPump
@@ -498,6 +504,29 @@ class GatewayRuntime:
             "previous_state": result.previous_state.value,
             "accepted": result.accepted,
         }
+
+    # ─────────────────────────── 기록 관리 ───────────────────────────
+
+    def _sessions_root(self) -> Path:
+        return self._config.data_root / "sessions"
+
+    def _active_session_id(self) -> Optional[str]:
+        """기록 중인 세션. 삭제를 막는 근거이므로 store를 직접 본다."""
+        if self._active_store is None:
+            return None
+        return self._active_store.snapshot().session_id
+
+    def list_archived_sessions(self) -> list[ArchivedSession]:
+        return list_sessions(self._sessions_root(), active_session_id=self._active_session_id())
+
+    def open_session_archive(self, session_id: str) -> tuple[IO[bytes], int]:
+        """호출자가 스트림을 닫아야 한다."""
+        return open_archive(self._sessions_root(), session_id)
+
+    def delete_archived_session(self, session_id: str) -> None:
+        delete_session(
+            self._sessions_root(), session_id, active_session_id=self._active_session_id(),
+        )
 
     # ─────────────────────────── 세션 ───────────────────────────
 

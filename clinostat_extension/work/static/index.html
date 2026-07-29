@@ -2465,5 +2465,209 @@ document.addEventListener('DOMContentLoaded', () => {
   setTimeout(nudgeCharts, 600);
 });
 </script>
+<!-- ─── 기록 관리 ────────────────────────────────────────────────────────────
+     파이에 쌓인 세션을 브라우저에서 받고 지운다. 카드를 JS로 만들어 붙이는
+     이유는 이 파일이 append-only 계약을 지켜야 해서다 — 위쪽 마크업을 건드리지
+     않는다.
+     ⚠ 삭제는 비가역이다. confirm() 대신 같은 버튼을 두 번 누르게 한다
+     (모달은 다른 자동화를 멈춰 세운다). 기록 중인 세션은 Gateway가 409로 막는다. -->
+<style>
+#spacebioArchive .sb-arch-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+#spacebioArchive .sb-arch-meta { color: var(--text-dim); font-size: 11px; font-variant-numeric: tabular-nums; }
+#spacebioArchive .sb-arch-list { max-height: 190px; overflow-y: auto; margin-top: 8px; }
+#spacebioArchive .sb-arch-row {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center; gap: 8px; padding: 5px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06); font-size: 11px;
+}
+#spacebioArchive .sb-arch-row:last-child { border-bottom: none; }
+#spacebioArchive .sb-arch-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#spacebioArchive .sb-arch-when { color: var(--text-dim); font-size: 10px; }
+#spacebioArchive .sb-arch-size { color: var(--blue); font-variant-numeric: tabular-nums; }
+#spacebioArchive button { padding: 3px 8px; font-size: 11px; width: auto; margin: 0; }
+#spacebioArchive .sb-arch-actions { display: flex; gap: 4px; }
+#spacebioArchive .sb-arch-empty { color: var(--text-dim); font-size: 11px; padding: 8px 0; }
+#spacebioArchive .sb-arch-err { color: var(--accent); font-size: 11px; min-height: 14px; }
+#spacebioArchive .sb-arch-live { color: var(--text-dim); font-size: 10px; }
+</style>
+<script>
+(function () {
+  'use strict';
+
+  const LIST_URL = '/api/spacebio/sessions';
+  const REFRESH_MS = 30000;
+  //: 두 번 눌러야 지워진다. 이 시간이 지나면 확인 상태가 풀린다.
+  const CONFIRM_WINDOW_MS = 4000;
+
+  const el = (tag, cls, text) => {
+    const node = document.createElement(tag);
+    if (cls) node.className = cls;
+    if (text !== undefined) node.textContent = text;
+    return node;
+  };
+
+  const formatBytes = (bytes) => {
+    if (!Number.isFinite(bytes)) return '-';
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(0) + ' KB';
+    return (bytes / 1024 / 1024).toFixed(1) + ' MB';
+  };
+
+  const formatWhen = (iso) => {
+    if (!iso) return '-';
+    const parsed = new Date(iso);
+    if (Number.isNaN(parsed.getTime())) return iso;
+    return parsed.toLocaleString('ko-KR', { hour12: false });
+  };
+
+  function buildCard() {
+    const card = el('div', 'sb-card');
+    card.id = 'spacebioArchive';
+    card.style.marginTop = '14px';
+
+    const head = el('div', 'sb-arch-head');
+    const title = el('h3', null, '기록 관리');
+    title.style.margin = '0';
+    const meta = el('span', 'sb-arch-meta');
+    meta.id = 'spacebioArchiveMeta';
+    const refresh = el('button', null, '새로고침');
+    refresh.id = 'spacebioArchiveRefresh';
+    head.append(title, meta, refresh);
+
+    const err = el('div', 'sb-arch-err');
+    err.id = 'spacebioArchiveError';
+    const list = el('div', 'sb-arch-list');
+    list.id = 'spacebioArchiveList';
+
+    card.append(head, err, list);
+    return card;
+  }
+
+  function renderRow(session, reload) {
+    const row = el('div', 'sb-arch-row');
+
+    const name = el('div', 'sb-arch-name');
+    name.title = session.session_id;
+    name.append(el('div', null, session.experiment_name || session.session_id));
+    const when = el('div', 'sb-arch-when', formatWhen(session.started_at));
+    if (session.active) when.append(el('span', 'sb-arch-live', ' · 기록 중'));
+    if (Number.isFinite(session.sample_rows)) {
+      when.append(el('span', 'sb-arch-live', ' · ' + session.sample_rows.toLocaleString() + '행'));
+    }
+    name.append(when);
+
+    const size = el('div', 'sb-arch-size', formatBytes(session.bytes));
+
+    const actions = el('div', 'sb-arch-actions');
+    const download = el('a', null, '받기');
+    download.href = LIST_URL + '/' + encodeURIComponent(session.session_id) + '/download';
+    download.setAttribute('download', session.session_id + '.tar.gz');
+    download.className = 'sb-arch-download';
+    download.style.cssText = 'padding:3px 8px;font-size:11px;border-radius:6px;'
+      + 'background:var(--card-2,#1e2633);color:var(--text);text-decoration:none;';
+
+    const remove = el('button', 'sb-danger', '삭제');
+    remove.dataset.stage = 'idle';
+    let timer = null;
+    remove.addEventListener('click', async () => {
+      if (remove.dataset.stage === 'idle') {
+        remove.dataset.stage = 'armed';
+        remove.textContent = '정말 삭제?';
+        timer = setTimeout(() => {
+          remove.dataset.stage = 'idle';
+          remove.textContent = '삭제';
+        }, CONFIRM_WINDOW_MS);
+        return;
+      }
+      clearTimeout(timer);
+      remove.disabled = true;
+      remove.textContent = '삭제 중';
+      await deleteSession(session.session_id);
+      reload();
+    });
+
+    actions.append(download, remove);
+    row.append(name, size, actions);
+    return row;
+  }
+
+  async function deleteSession(sessionId) {
+    const errBox = document.getElementById('spacebioArchiveError');
+    try {
+      const resp = await fetch(LIST_URL + '/' + encodeURIComponent(sessionId), {
+        method: 'DELETE',
+      });
+      if (!resp.ok) {
+        const payload = await resp.json().catch(() => null);
+        const code = payload && payload.error && payload.error.code;
+        errBox.textContent = code === 'session_active'
+          ? '기록 중인 세션은 지울 수 없습니다. 측정을 먼저 정지하세요.'
+          : '삭제 실패 (' + resp.status + ')';
+        return;
+      }
+      errBox.textContent = '';
+    } catch (e) {
+      errBox.textContent = '삭제 실패 — 게이트웨이에 닿지 못했습니다.';
+    }
+  }
+
+  async function loadSessions() {
+    const list = document.getElementById('spacebioArchiveList');
+    const meta = document.getElementById('spacebioArchiveMeta');
+    const errBox = document.getElementById('spacebioArchiveError');
+    if (!list) return;
+
+    let sessions;
+    try {
+      const resp = await fetch(LIST_URL);
+      if (!resp.ok) throw new Error('http ' + resp.status);
+      const payload = await resp.json();
+      sessions = (payload && payload.data && payload.data.sessions) || [];
+      errBox.textContent = '';
+    } catch (e) {
+      errBox.textContent = '목록을 불러오지 못했습니다.';
+      return;
+    }
+
+    const total = sessions.reduce((sum, s) => sum + (s.bytes || 0), 0);
+    meta.textContent = sessions.length + '개 · ' + formatBytes(total);
+
+    list.replaceChildren();
+    if (sessions.length === 0) {
+      list.append(el('div', 'sb-arch-empty', '기록된 세션이 없습니다.'));
+      return;
+    }
+    sessions.forEach((s) => list.append(renderRow(s, loadSessions)));
+  }
+
+  function mount() {
+    const panel = document.getElementById('spacebioPanel');
+    if (!panel || document.getElementById('spacebioArchive')) return;
+
+    const chartCard = (document.getElementById('resistanceChart') || {}).closest
+      ? document.getElementById('resistanceChart').closest('.sb-card')
+      : null;
+    const card = buildCard();
+    if (chartCard) chartCard.parentNode.insertBefore(card, chartCard.nextSibling);
+    else panel.append(card);
+
+    document.getElementById('spacebioArchiveRefresh')
+      .addEventListener('click', loadSessions);
+
+    // 측정을 멈추면 세션이 닫히면서 크기가 확정된다 — 조금 기다렸다 다시 읽는다.
+    const stopButton = document.getElementById('resistanceStop');
+    if (stopButton) stopButton.addEventListener('click', () => setTimeout(loadSessions, 1500));
+
+    loadSessions();
+    setInterval(loadSessions, REFRESH_MS);
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', mount);
+  } else {
+    mount();
+  }
+})();
+</script>
 </body>
 </html>

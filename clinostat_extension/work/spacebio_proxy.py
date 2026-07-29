@@ -16,8 +16,9 @@ from __future__ import annotations
 import asyncio
 import re
 import uuid
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable, Optional
+from typing import Any, AsyncIterator, Awaitable, Callable, Optional
 
 import httpx
 
@@ -51,7 +52,19 @@ ROUTE_MAP: dict[str, str] = {
     "/api/spacebio/session/start": "/api/session/start",
     "/api/spacebio/session/update": "/api/session/update",
     "/api/spacebio/session/finish": "/api/session/finish",
+    "/api/spacebio/sessions": "/api/sessions",
 }
+
+#: 기록 관리의 다운로드·삭제는 경로에 session_id가 들어가 ROUTE_MAP(정확 일치)으로
+#: 못 다룬다. 브라우저가 준 문자열을 그대로 이어붙이지 않고 이 패턴을 통과한 것만
+#: 경로로 조립한다 — Gateway가 한 번 더 검사하지만 여기서 먼저 막는다.
+SESSION_ID_RE = re.compile(r"^spacebio_\d{8}_\d{6}_[A-Za-z0-9]+$")
+
+#: 아카이브 응답에서 브라우저로 넘길 헤더. 나머지는 버린다.
+ARCHIVE_PASSTHROUGH_HEADERS = ("Content-Length", "Content-Disposition")
+
+#: 아카이브는 크다(시간당 13 MB). 목록/변경보다 넉넉한 시한을 준다.
+ARCHIVE_TIMEOUT_S = 120.0
 
 _PATH_RE = re.compile(r"(?:[A-Za-z]:)?(?:/[\w.\-]+){2,}")
 _TRACEBACK_MARKERS = ("Traceback (most recent call last)", 'File "')
@@ -72,6 +85,15 @@ class ProxyGatewayError(Exception):
 
 
 @dataclass(frozen=True)
+class ArchiveStream:
+    """열린 아카이브 응답 — 본문은 청크로 흘려보낸다."""
+
+    media_type: str
+    headers: dict[str, str]
+    chunks: AsyncIterator[bytes]
+
+
+@dataclass(frozen=True)
 class StopResult:
     """STOP ALL 결과 — 두 정지를 독립적으로 보고한다 (스펙 6.1/7)."""
 
@@ -79,6 +101,14 @@ class StopResult:
     pump_ok: bool
     clinostat_error: Optional[str] = None
     pump_error: Optional[str] = None
+
+
+def archive_gateway_path(session_id: str, *, download: bool = False) -> str:
+    """검증한 `session_id`로 기록 관리 경로를 **조립**한다. 통과 못 하면 거부한다."""
+    if not SESSION_ID_RE.match(session_id or ""):
+        raise ProxyPathError(f"not a session id: {session_id!r}")
+    suffix = "/download" if download else ""
+    return f"/api/sessions/{session_id}{suffix}"
 
 
 def gateway_path(browser_path: str) -> str:
@@ -148,6 +178,60 @@ class SpaceBioProxy:
             raise ProxyGatewayError(
                 504, {"code": "gateway_unreachable", "message": str(exc)}
             ) from exc
+
+    async def delete_session(
+        self, session_id: str, request_id: Optional[str]
+    ) -> dict[str, Any]:
+        """기록 삭제. **자동 재시도하지 않는다** — 비가역이다."""
+        target = archive_gateway_path(session_id)
+        rid = request_id or new_request_id()
+        try:
+            return await self._send("DELETE", target, None, rid, MUTATE_TIMEOUT_S)
+        except _TransportFailure as exc:
+            raise ProxyGatewayError(
+                504, {"code": "gateway_unreachable", "message": str(exc)}
+            ) from exc
+
+    @asynccontextmanager
+    async def open_archive(
+        self, session_id: str, request_id: Optional[str]
+    ) -> AsyncIterator["ArchiveStream"]:
+        """세션 아카이브를 스트림으로 연다. 본문을 메모리에 모으지 않는다."""
+        target = archive_gateway_path(session_id, download=True)
+        rid = request_id or new_request_id()
+        timeout = httpx.Timeout(ARCHIVE_TIMEOUT_S, connect=CONNECT_TIMEOUT_S)
+        req = self._client.build_request(
+            "GET", target, headers={"X-Request-ID": rid}, timeout=timeout,
+        )
+        try:
+            response = await self._client.send(req, stream=True)
+        except httpx.HTTPError as exc:
+            raise ProxyGatewayError(
+                504, {"code": "gateway_unreachable", "message": str(exc) or type(exc).__name__},
+            ) from exc
+
+        try:
+            if response.status_code >= 400:
+                await response.aread()
+                try:
+                    payload = response.json()
+                except ValueError:
+                    payload = None
+                raise ProxyGatewayError(
+                    response.status_code, _sanitized_error(payload, "gateway_error"),
+                )
+            headers = {
+                name: response.headers[name]
+                for name in ARCHIVE_PASSTHROUGH_HEADERS
+                if name in response.headers
+            }
+            yield ArchiveStream(
+                media_type=response.headers.get("Content-Type", "application/gzip"),
+                headers=headers,
+                chunks=response.aiter_bytes(),
+            )
+        finally:
+            await response.aclose()
 
     async def _send(
         self,

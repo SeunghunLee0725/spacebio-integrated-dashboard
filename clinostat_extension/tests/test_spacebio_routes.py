@@ -96,7 +96,18 @@ def test_browser_routes_match_the_panel_and_proxy_allowlist(tree):
     import spacebio_proxy
 
     registered = {p for _m, p in _decorated_routes(tree) if p.startswith("/api/spacebio/")}
-    assert registered <= set(spacebio_proxy.ROUTE_MAP), \
+    # 기록 관리의 다운로드·삭제만 경로에 session_id가 들어가 정확 일치 허용목록에
+    # 담기지 않는다. 대신 `archive_gateway_path`가 session_id를 검증해 경로를
+    # 조립한다 — 아래에서 그 검증이 실제로 있는지 확인한다.
+    templated = {p for p in registered if "{" in p}
+    assert templated == {
+        "/api/spacebio/sessions/{session_id}",
+        "/api/spacebio/sessions/{session_id}/download",
+    }, "새 파라미터 경로를 열었다면 session_id 검증 경로를 함께 확인해야 한다"
+    with pytest.raises(spacebio_proxy.ProxyPathError):
+        spacebio_proxy.archive_gateway_path("../../etc/passwd")
+
+    assert (registered - templated) <= set(spacebio_proxy.ROUTE_MAP), \
         "프록시 허용목록에 없는 경로를 등록했다"
 
     html = (WORK / "static" / "index.html").read_text(encoding="utf-8")
