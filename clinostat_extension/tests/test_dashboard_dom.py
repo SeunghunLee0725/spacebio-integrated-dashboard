@@ -526,3 +526,16 @@ def test_tasmg_sits_next_to_the_rpm_chart(work):
     start = work.index("function spacebioApplyOneScreenLayout")
     section = work[start:work.index(chr(10) + "}", start)]
     assert "insertBefore(tasmgCard, chartCard.nextSibling)" in section
+
+
+def test_event_card_sits_next_to_the_sensor_card(work):
+    """저항센서를 절반 폭으로 줄이고 그 옆에 이벤트를 둔다."""
+    wide = work[work.index("@media (min-width: 1600px)"):]
+    wide = wide[:wide.index(chr(10) + "}")]
+    assert "#spacebioPanel .sb-grid { grid-template-columns: 1fr 1fr !important; }" in wide
+    # 이벤트 카드는 인라인 margin-top:14px 를 갖고 있어 그리드에선 지워야 붙는다.
+    assert "#spacebioPanel .sb-grid .sb-event-card { margin-top: 0 !important; }" in wide
+
+    start = work.index("function spacebioApplyOneScreenLayout")
+    section = work[start:work.index(chr(10) + "}", start)]
+    assert "sbGrid.appendChild(eventCard)" in section

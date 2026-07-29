@@ -2273,7 +2273,10 @@ document.addEventListener('DOMContentLoaded', spacebioInit);
   }
   #spacebioPanel { margin-top: 0 !important; }
   /* 좁아진 열에서는 카드를 한 줄로 세운다 */
-  #spacebioPanel .sb-grid { grid-template-columns: 1fr !important; }
+  /* 저항센서를 절반 폭으로 줄이고 그 옆에 이벤트를 둔다.
+     이벤트 카드는 인라인 margin-top:14px 를 갖고 있어 그리드에선 지운다. */
+  #spacebioPanel .sb-grid { grid-template-columns: 1fr 1fr !important; }
+  #spacebioPanel .sb-grid .sb-event-card { margin-top: 0 !important; }
   #spacebioPanel .sb-chart-wrap { height: 180px !important; }
   /* 측정값 5행이 세로로 길다 — 2열로 접어 붙인다(실측 425 → 382px). */
   #spacebioPanel .sb-readouts { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; }
@@ -2398,6 +2401,15 @@ function spacebioApplyOneScreenLayout() {
   if (tasmgCard && chartCard && tasmgCard.previousElementSibling !== chartCard) {
     tasmgCard.classList.add('sb-row2-metric');
     chartCard.parentNode.insertBefore(tasmgCard, chartCard.nextSibling);
+  }
+
+  // 이벤트는 저항센서 옆으로. 저항센서를 절반 폭으로 줄여 그 자리를 만든다.
+  const sbGrid = panel.querySelector('.sb-grid');
+  const events = document.getElementById('spacebioEvents');
+  const eventCard = events && events.closest('.sb-card');
+  if (sbGrid && eventCard && eventCard.parentNode !== sbGrid) {
+    eventCard.classList.add('sb-event-card');
+    sbGrid.appendChild(eventCard);
   }
 
   // 측정값 5행을 2열로 묶는다 — 세로로 나열하면 카드가 그만큼 길어진다.
