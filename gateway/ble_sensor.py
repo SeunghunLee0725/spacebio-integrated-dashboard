@@ -44,6 +44,10 @@ DEFAULT_SCAN_TIMEOUT_S = 15.0
 #: 넘치면 **가장 오래된 것부터** 버린다 — 최신값이 화면·루프에 더 중요하다.
 MAX_BUFFERED_SAMPLES = 2048
 
+#: 연결이 끊긴 뒤 재연결을 몇 번까지 시도할지. 보드 전원 교체·리셋은 흔한 일이라
+#: 한 번 끊겼다고 바로 오류로 올리지 않는다. 연속 실패가 이 값을 넘으면 FAULT.
+MAX_RECONNECT_ATTEMPTS = 5
+
 
 @dataclass(frozen=True)
 class BleTarget:
@@ -88,9 +92,12 @@ class BleSensorSource:
         scan_timeout_s: float = DEFAULT_SCAN_TIMEOUT_S,
         client_factory: Optional[Callable[[], BleClient]] = None,
         max_buffered: int = MAX_BUFFERED_SAMPLES,
+        max_reconnects: int = MAX_RECONNECT_ATTEMPTS,
     ) -> None:
         self._target = target or BleTarget()
         self._scan_timeout_s = scan_timeout_s
+        self._max_reconnects = max_reconnects
+        self._reconnects = 0
         self._client_factory = client_factory
         self._buffer: deque[SensorSample] = deque(maxlen=max_buffered)
         self._task: Optional[asyncio.Task[None]] = None
@@ -141,26 +148,56 @@ class BleSensorSource:
     # ── 내부 ─────────────────────────────────────────────────────────
 
     async def _run(self) -> None:
+        """연결 → 수신 → (끊기면) 재연결. 취소될 때까지 유지한다.
+
+        보드 전원을 갈거나 리셋하면 BLE가 끊긴다. 재연결이 없으면 소스가 조용히
+        멈춘 채 state만 running으로 남아, 운영자가 '센서가 느린 것'과 구분할 수 없다.
+        **첫 연결 실패는 즉시 오류**(장치가 없다는 뜻)지만, 한 번 붙은 뒤의 끊김은
+        일시적일 수 있으므로 backoff로 재시도하고 연속 실패가 쌓이면 오류로 올린다.
+        """
         try:
             client = self._make_client()
             self._client = client
-            connected = await client.connect(self._target, self._scan_timeout_s)
-            if not connected:
+
+            if not await client.connect(self._target, self._scan_timeout_s):
                 self._error = (
                     f"BLE device not found ({self._target.describe()}, "
                     f"scanned {self._scan_timeout_s:.0f}s) — 전원과 광고 상태를 확인하세요"
                 )
                 logger.warning("%s", self._error)
                 return
+
             logger.info("BLE 센서 연결됨 (%s)", self._target.describe())
-            async for payload in client.stream():
-                sample = self._to_sample(payload)
-                if sample is not None:
-                    self._push(sample)
+            failures = 0
+            while True:
+                async for payload in client.stream():
+                    sample = self._to_sample(payload)
+                    if sample is not None:
+                        self._push(sample)
+                    failures = 0          # 데이터가 흐르면 실패 카운트를 지운다
+
+                # stream이 끝났다 = 연결이 끊겼다.
+                failures += 1
+                if failures > self._max_reconnects:
+                    self._error = (
+                        f"BLE 연결이 끊긴 뒤 재연결 {self._max_reconnects}회 모두 실패 "
+                        f"({self._target.describe()})"
+                    )
+                    logger.warning("%s", self._error)
+                    return
+                delay = min(2.0 * failures, 10.0)
+                logger.warning("BLE 연결 끊김 — %.0f초 후 재연결 시도 (%d/%d)",
+                               delay, failures, self._max_reconnects)
+                await asyncio.sleep(delay)
+                with contextlib.suppress(Exception):
+                    await client.disconnect()
+                if await client.connect(self._target, self._scan_timeout_s):
+                    self._reconnects += 1
+                    logger.info("BLE 센서 재연결됨 (%s)", self._target.describe())
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001 — 어떤 실패든 tick()으로 알린다
-            self._error = f"BLE stream failed for {self._device_name!r}: {exc}"
+            self._error = f"BLE stream failed ({self._target.describe()}): {exc}"
             logger.exception("BLE 수신 실패")
 
     def _make_client(self) -> BleClient:
@@ -212,6 +249,7 @@ class _BleakClientAdapter:
         self._client: Any = None
         self._data_uuid = SENSOR_DATA_UUID
         self._queue: asyncio.Queue[bytes] = asyncio.Queue()
+        self._disconnected = asyncio.Event()
 
     async def connect(self, target: BleTarget, timeout: float) -> bool:
         try:
@@ -222,7 +260,11 @@ class _BleakClientAdapter:
         device = await self._discover(BleakScanner, target, timeout)
         if device is None:
             return False
-        self._client = BleakClient(device)
+        self._disconnected.clear()
+        # 끊김을 이벤트로 받는다. 이게 없으면 stream()이 큐에서 영원히 대기해
+        # 보드가 리셋돼도 아무도 모른다(2026-07-29 전원 교체 시험 전에 발견).
+        self._client = BleakClient(
+            device, disconnected_callback=lambda _c: self._disconnected.set())
         await self._client.connect()
         await self._client.start_notify(self._data_uuid, self._on_notify)
         return True
@@ -263,8 +305,18 @@ class _BleakClientAdapter:
         self._queue.put_nowait(bytes(data))
 
     async def stream(self) -> AsyncIterator[bytes]:
-        while True:
-            yield await self._queue.get()
+        """끊길 때까지 패킷을 낸다. 끊기면 조용히 끝낸다 — 호출부가 재연결한다."""
+        while not self._disconnected.is_set():
+            getter = asyncio.ensure_future(self._queue.get())
+            waiter = asyncio.ensure_future(self._disconnected.wait())
+            done, pending = await asyncio.wait(
+                {getter, waiter}, return_when=asyncio.FIRST_COMPLETED)
+            for task in pending:
+                task.cancel()
+            if getter in done:
+                yield getter.result()
+            else:
+                return          # 끊김
 
     async def disconnect(self) -> None:
         if self._client is None:

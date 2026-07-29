@@ -297,3 +297,79 @@ async def test_discovery_uses_address_when_given():
         scanner, BleTarget(address="2D:62:81:2C:26:C2"), 5.0)
     assert found is dev
     assert scanner.by_address_calls == ["2D:62:81:2C:26:C2"]
+
+
+# ─────────────────────── 끊김·재연결 (전원 교체 대응) ───────────────────────
+#
+# 보드 전원을 갈거나 리셋하면 BLE 가 끊긴다. 재연결이 없으면 소스가 조용히 멈춘 채
+# state 만 running 으로 남아, 운영자가 '느린 센서'와 구분할 수 없다.
+
+class FlakyBleClient:
+    """지정한 횟수만큼 스트림이 중간에 끊기는 클라이언트."""
+
+    def __init__(self, rounds, *, reconnect_ok=True):
+        self._rounds = list(rounds)      # 라운드별로 낼 패킷 목록
+        self._reconnect_ok = reconnect_ok
+        self.connect_calls = 0
+        self.disconnect_calls = 0
+
+    async def connect(self, target, timeout: float) -> bool:
+        self.connect_calls += 1
+        if self.connect_calls == 1:
+            return True
+        return self._reconnect_ok
+
+    async def stream(self):
+        if not self._rounds:
+            return                        # 더 낼 것이 없으면 끊긴 것으로 본다
+        for p in self._rounds.pop(0):
+            yield p
+            await asyncio.sleep(0)
+        return                            # 라운드 끝 = 연결 끊김
+
+    async def disconnect(self) -> None:
+        self.disconnect_calls += 1
+
+
+@pytest.mark.asyncio
+async def test_reconnects_after_disconnect_and_keeps_streaming():
+    client = FlakyBleClient([
+        [_packet(timestamp_ms=10)],       # 1라운드 → 끊김
+        [_packet(timestamp_ms=20)],       # 재연결 후 2라운드
+    ])
+    src = BleSensorSource(target=BleTarget(), client_factory=lambda: client,
+                          max_reconnects=3)
+    src.start()
+    samples = await _drain(src, 2, timeout=6.0)
+    await src.aclose()
+
+    assert [s.source_timestamp_ms for s in samples] == [10, 20]
+    assert client.connect_calls >= 2, "재연결을 시도해야 한다"
+
+
+@pytest.mark.asyncio
+async def test_gives_up_after_max_reconnects_and_reports_error():
+    """무한 재시도로 조용히 매달려 있으면 안 된다 — 결국은 알려야 한다."""
+    client = FlakyBleClient([[_packet()]], reconnect_ok=False)
+    src = BleSensorSource(target=BleTarget(), client_factory=lambda: client,
+                          max_reconnects=1)
+    src.start()
+    for _ in range(200):
+        await asyncio.sleep(0.05)
+        if src._error is not None:
+            break
+    with pytest.raises(SensorSourceError, match="재연결"):
+        src.tick()
+    await src.aclose()
+
+
+@pytest.mark.asyncio
+async def test_first_connect_failure_is_not_treated_as_reconnect():
+    """처음부터 못 붙은 것은 '장치 없음'이지 '끊김'이 아니다 — 메시지가 달라야 한다."""
+    src = BleSensorSource(target=BleTarget(name="Missing"),
+                          client_factory=lambda: FakeBleClient([], fail_connect=True))
+    src.start()
+    await asyncio.sleep(0.05)
+    with pytest.raises(SensorSourceError, match="not found"):
+        src.tick()
+    await src.aclose()
