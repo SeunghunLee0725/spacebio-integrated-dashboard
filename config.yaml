@@ -8,7 +8,9 @@ pump:
   backend: null          # null | serial   (하드웨어 연결 시 serial)
   serial_port: /dev/ttyUSB0
   limits:
+    min_volume_ul: 1.0
     max_volume_ul: 1000.0
+    min_rate_ul_s: 1.0
     max_rate_ul_s: 200.0
 
 loop:
@@ -17,6 +19,57 @@ loop:
 ble:
   source: simulated      # simulated | bleak   (센서 노드 연결 시 bleak)
   device_name: ResistanceSensor
+  # ⚠ 탐색은 서비스 UUID로 한다 — device_name은 보조 필터일 뿐이다.
+  #   레퍼런스 저항: 장치에 써 넣는 설정이며, 쓰면 펌웨어가 저항을 재계산하고
+  #   baseline을 재설정한다. 원본 앱(20260331_LOC_SYLee)의 기본값과 같은 10 kΩ.
+  #   비우면 보드에 마지막으로 쓰인 값을 그대로 쓴다.
+  rref_ohm: 10000
+  # 시간평균 계수 — 원시 N개를 하나로 평균한다(출력 주파수 = fs/N). 1이면 평균 안 함.
+  avg_factor: 1
 
 store:
   db_path: ./data/gateway.sqlite
+  data_root: /home/aiworker-1/spacebio-data
+  flush_interval_s: 1.0
+  flush_record_count: 100
+
+# ─── FastAPI Gateway (설계 스펙 6장) ───────────────────────────────────────
+# 위 mqtt/pump.serial_port/loop/ble 섹션은 DEC-012로 동결된 구 게이트웨이
+# (gateway/main.py) 설정이다 — 지우지 않는다. 아래는 신규 gateway/app.py용.
+
+gateway:
+  host: 127.0.0.1
+  port: 8010
+  # 센서 폴링(=수집) 주파수. 소스보다 느리면 버퍼가 쌓여 표시값이 뒤처지고
+  # 결국 오래된 샘플이 버려진다. 실기 BLE 센서 실측이 28 Hz(간격 중앙값 45ms,
+  # 최대 196ms)라 여유를 두어 50으로 잡는다.
+  # ⚠ 브라우저 WebSocket 발행은 MAX_PUBLISH_HZ(10)로 따로 clamp되므로
+  #   이 값을 올려도 화면 갱신 부하는 늘지 않는다.
+  sensor_publish_hz: 50
+  browser_publish_hz: 5
+  min_free_bytes: 524288000
+
+sensor:
+  datasets_dir: ./datasets
+  adc_full_scale: 4095
+  reference_resistor_ohm: 82500.0
+  default_temperature_c: 25.0
+  default_battery_pct: 100
+  # 실기 저항센서(SERIAL_LIVE) — Nano 33 BLE USB 직결
+  serial_port: /dev/ttyACM0
+  serial_baudrate: 115200
+
+# ─── 실기 무선 펌프 (선택) ─────────────────────────────────────────────────
+# 기본은 모의 펌프다. 실기 무선 펌프를 쓰려면 pump.backend를 "wireless"로 두고
+# 아래 mqtt.username/password를 채운 config를 파이에만 배치한다(커밋 금지 — 자격증명).
+#   pump:
+#     backend: wireless
+#   mqtt:
+#     host: 127.0.0.1
+#     port: 1883
+#     username: s25007board
+#     password: <파이 로컬 config에만>
+# gateway/app.py는 위 gateway.mqtt 대신 최상위 mqtt.username/password를 읽는다.
+
+coordinator:
+  state_root: /home/aiworker-1/clinostat/spacebio-state

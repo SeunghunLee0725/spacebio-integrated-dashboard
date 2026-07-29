@@ -1,0 +1,11 @@
+{
+  "datasets": [
+    {
+      "dataset_id": "thinkpad_20260714_172138_ble_test",
+      "filename": "thinkpad_20260714_172138_ble_test.csv",
+      "sha256": "23a06967dc644f2cc91f847e7445347fc2f9917c4edee79180647c6b0f5940fb",
+      "provenance": "ThinkPad 게이트웨이로 수집한 실제 BLE 저항 센서 측정 (2026-07-14 17:21:38 세션)",
+      "sample_count": 522
+    }
+  ]
+}

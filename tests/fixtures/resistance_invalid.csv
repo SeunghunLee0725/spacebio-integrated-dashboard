@@ -1,0 +1,4 @@
+timestamp_ms,raw_adc,resistance_ohm,delta_r_over_r0,temperature_c,battery_pct
+1000,1200,416.43,0.0,25.0,90
+1300,1210,420.11,0.0088,25.1,90
+1200,1215,421.02,0.011,25.1,90

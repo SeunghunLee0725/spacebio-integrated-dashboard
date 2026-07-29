@@ -22,3 +22,4 @@
 !*.env.example
 !/deploy/*.env.example
 /.omc/
+deploy/baseline/raw/

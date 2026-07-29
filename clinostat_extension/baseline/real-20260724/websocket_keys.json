@@ -1,0 +1,85 @@
+{
+  "keys": {
+    "elapsed": {
+      "nullable": false,
+      "types": [
+        "number"
+      ]
+    },
+    "inner_actual": {
+      "nullable": false,
+      "types": [
+        "number"
+      ]
+    },
+    "inner_angle": {
+      "nullable": false,
+      "types": [
+        "number"
+      ]
+    },
+    "inner_rpm": {
+      "nullable": false,
+      "types": [
+        "number"
+      ]
+    },
+    "metrics_cmd": {
+      "nullable": false,
+      "types": [
+        "object"
+      ]
+    },
+    "metrics_meas": {
+      "nullable": false,
+      "types": [
+        "object"
+      ]
+    },
+    "outer_actual": {
+      "nullable": false,
+      "types": [
+        "number"
+      ]
+    },
+    "outer_angle": {
+      "nullable": false,
+      "types": [
+        "number"
+      ]
+    },
+    "outer_rpm": {
+      "nullable": false,
+      "types": [
+        "number"
+      ]
+    },
+    "running": {
+      "nullable": false,
+      "types": [
+        "boolean"
+      ]
+    },
+    "sensor": {
+      "nullable": false,
+      "types": [
+        "object"
+      ]
+    },
+    "strategy_name": {
+      "nullable": false,
+      "types": [
+        "string"
+      ]
+    },
+    "strategy_params": {
+      "nullable": false,
+      "types": [
+        "object"
+      ]
+    }
+  },
+  "message_count": 199,
+  "observed_seconds": 20.0,
+  "path": "/ws"
+}

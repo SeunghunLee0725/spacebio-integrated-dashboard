@@ -1,0 +1,1705 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Clinostat Controller</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+<style>
+  :root {
+    --bg: #1a1a2e;
+    --surface: #16213e;
+    --card: #0f3460;
+    --accent: #e94560;
+    --green: #0cca4a;
+    --blue: #4cc9f0;
+    --orange: #f8961e;
+    --text: #eee;
+    --text-dim: #999;
+    --radius: 10px;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+  }
+  header {
+    background: var(--surface);
+    padding: 16px 32px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 2px solid var(--card);
+  }
+  header h1 { font-size: 1.4em; font-weight: 600; }
+  .status-bar {
+    display: flex;
+    gap: 20px;
+    font-size: 0.85em;
+  }
+  .status-dot {
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    display: inline-block;
+    margin-right: 5px;
+    background: #555;
+  }
+  .status-dot.on { background: var(--green); }
+
+  .main {
+    display: grid;
+    grid-template-columns: 340px 1fr;
+    gap: 16px;
+    padding: 16px;
+    max-width: 1600px;
+    margin: 0 auto;
+  }
+
+  /* --- 좌측 패널 --- */
+  .panel {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .card {
+    background: var(--surface);
+    border-radius: var(--radius);
+    padding: 16px;
+    border: 1px solid #2a2a4a;
+  }
+  .card h3 {
+    font-size: 0.9em;
+    color: var(--text-dim);
+    margin-bottom: 12px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+  /* Manual Operation 드롭다운(<details>) */
+  .manual-op-card { padding: 12px 16px; }
+  .manual-op-card > .manual-op-summary {
+    font-size: 0.9em;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    cursor: pointer;
+    list-style: none;       /* Firefox: 기본 삼각형 숨김 */
+    user-select: none;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .manual-op-card > .manual-op-summary::-webkit-details-marker { display: none; } /* Chrome */
+  .manual-op-card > .manual-op-summary .chev {
+    transition: transform 0.18s ease;
+    display: inline-block;
+    font-size: 0.9em;
+  }
+  .manual-op-card[open] > .manual-op-summary .chev { transform: rotate(180deg); }
+  .manual-op-card[open] > .manual-op-summary { margin-bottom: 10px; }
+  .form-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+  .form-row label {
+    width: 90px;
+    font-size: 0.85em;
+    color: var(--text-dim);
+  }
+  select, input[type="number"], input[type="text"] {
+    background: var(--bg);
+    color: var(--text);
+    border: 1px solid #333;
+    border-radius: 6px;
+    padding: 6px 10px;
+    font-size: 0.9em;
+    flex: 1;
+    min-width: 0;
+  }
+  select:focus, input:focus { outline: none; border-color: var(--blue); }
+
+  .btn-row { display: flex; gap: 8px; margin-top: 8px; }
+  button {
+    border: none;
+    border-radius: 6px;
+    padding: 8px 16px;
+    cursor: pointer;
+    font-size: 0.85em;
+    font-weight: 600;
+    transition: opacity 0.2s;
+  }
+  button:hover { opacity: 0.85; }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+  .btn-connect { background: var(--blue); color: #000; }
+  .btn-disconnect { background: #555; color: #fff; }
+  .btn-test { background: var(--orange); color: #000; }
+  .btn-refresh { background: #333; color: #ccc; font-size: 0.8em; padding: 6px 10px; }
+
+  .btn-start {
+    background: var(--green);
+    color: #000;
+    font-size: 1.1em;
+    padding: 14px;
+    width: 100%;
+  }
+  .btn-stop {
+    background: var(--accent);
+    color: #fff;
+    font-size: 1.1em;
+    padding: 14px;
+    width: 100%;
+  }
+
+  /* --- 우측: 모니터 --- */
+  .monitor {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .monitor-top {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 12px;
+  }
+  .metric-card {
+    background: var(--surface);
+    border-radius: var(--radius);
+    padding: 16px;
+    text-align: center;
+    border: 1px solid #2a2a4a;
+  }
+  .metric-card .label { font-size: 0.8em; color: var(--text-dim); margin-bottom: 4px; }
+  .metric-card .value {
+    font-size: 1.8em;
+    font-weight: 700;
+    font-family: 'Consolas', monospace;
+  }
+  .metric-card .unit { font-size: 0.7em; color: var(--text-dim); }
+  .outer-color { color: var(--blue); }
+  .inner-color { color: var(--green); }
+  .time-color { color: var(--orange); }
+
+  .chart-card {
+    background: var(--surface);
+    border-radius: var(--radius);
+    padding: 16px;
+    border: 1px solid #2a2a4a;
+    flex: none;            /* 부모 flex 컬럼에서 늘어나지 않도록 고정 */
+    height: 360px;         /* RPM 그래프(~280px) + 하단 메트릭 footer(~60px) */
+    display: flex;
+    flex-direction: column;
+  }
+  .chart-card canvas {
+    width: 100% !important;
+    flex: 1;               /* footer 를 제외한 공간 전부를 canvas 가 차지 */
+    min-height: 0;         /* flex item 이 줄어들 수 있도록 */
+  }
+  .chart-footer {
+    flex: none;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid #2a2a4a;
+  }
+  .chart-footer .cf-metric {
+    display: flex;
+    align-items: baseline;
+    justify-content: center;
+    gap: 8px;
+  }
+  .chart-footer .cf-metric .lbl {
+    font-size: 0.8em;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+  }
+  .chart-footer .cf-metric .val {
+    font-size: 1.7em;
+    font-weight: 700;
+    font-family: 'Consolas', monospace;
+    line-height: 1;
+  }
+  .chart-footer .cf-metric .unit {
+    font-size: 0.78em;
+    color: var(--text-dim);
+  }
+
+  .sensor-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+  }
+  .sensor-card {
+    background: var(--surface);
+    border-radius: var(--radius);
+    padding: 14px;
+    text-align: center;
+    border: 1px solid #2a2a4a;
+  }
+  .sensor-card .label { font-size: 0.75em; color: var(--text-dim); }
+  .sensor-card .value {
+    font-size: 1.3em;
+    font-weight: 600;
+    font-family: 'Consolas', monospace;
+    color: var(--accent);
+  }
+
+  .func-desc {
+    font-size: 0.75em;
+    color: var(--text-dim);
+    font-family: 'Consolas', monospace;
+    margin-top: 4px;
+    padding: 6px 8px;
+    background: var(--bg);
+    border-radius: 4px;
+  }
+
+  /* --- 논문 메트릭 카드 --- */
+  .metrics-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+  .metric-paper {
+    background: var(--surface);
+    border-radius: var(--radius);
+    padding: 14px;
+    border: 1px solid #2a2a4a;
+    min-height: 280px;
+    display: flex;
+    flex-direction: column;
+  }
+  .metric-paper h4 {
+    font-size: 0.85em;
+    color: var(--text-dim);
+    margin-bottom: 8px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+  }
+  .metric-paper h4 .target {
+    font-size: 0.7em;
+    color: var(--orange);
+    text-transform: none;
+    letter-spacing: 0;
+  }
+  .metric-paper .body { flex: 1; position: relative; min-height: 0; }
+
+  .I5-gauge {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-top: 8px;
+  }
+  .I5-gauge .col {
+    background: var(--bg);
+    border-radius: 6px;
+    padding: 12px;
+    text-align: center;
+  }
+  .I5-gauge .col .lbl { font-size: 0.7em; color: var(--text-dim); }
+  .I5-gauge .col .val {
+    font-size: 1.8em;
+    font-weight: 700;
+    font-family: 'Consolas', monospace;
+    margin: 6px 0;
+  }
+  .I5-gauge .val.good { color: var(--green); }
+  .I5-gauge .val.warn { color: var(--orange); }
+  .I5-gauge .val.bad  { color: var(--accent); }
+
+  .summary-row {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 6px;
+    margin-top: 8px;
+    font-size: 0.72em;
+    text-align: center;
+  }
+  .summary-row .pair {
+    background: var(--bg);
+    border-radius: 4px;
+    padding: 6px 4px;
+  }
+  .summary-row .pair .k { color: var(--text-dim); }
+  .summary-row .pair .v { font-family: 'Consolas', monospace; }
+
+  #sphereDiv { width: 100%; height: 100%; min-height: 240px; }
+
+  /* --- 카메라 카드 --- */
+  .cam-card {
+    background: var(--surface);
+    border-radius: var(--radius);
+    padding: 12px;
+    border: 1px solid #2a2a4a;
+  }
+  .cam-card h3 {
+    font-size: 0.9em;
+    color: var(--text-dim);
+    margin-bottom: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .cam-wrap {
+    --cam-aspect-ratio: 4 / 3;
+    --cam-native-width: 640px;
+    --cam-native-height: 480px;
+    position: relative;
+    width: 100%;
+    height: auto;
+    max-width: 100%;
+    margin: 0 auto;
+    background: #000;
+    border-radius: 6px;
+    aspect-ratio: var(--cam-aspect-ratio);
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: aspect-ratio 0.2s ease;
+  }
+  .cam-wrap img { width: 100%; height: 100%; object-fit: contain; display: none; }
+  .cam-wrap .placeholder {
+    color: var(--text-dim);
+    font-size: 0.9em;
+    text-align: center;
+  }
+  .cam-meta {
+    margin-top: 6px;
+    font-size: 0.72em;
+    color: var(--text-dim);
+    display: flex;
+    justify-content: space-between;
+  }
+  .cam-toggle {
+    background: var(--green);
+    color: #000;
+    border: none;
+    border-radius: 5px;
+    padding: 5px 12px;
+    font-size: 0.8em;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .cam-toggle.off { background: var(--accent); color: #fff; }
+
+  /* --- 카메라(좌) + 그래프(우) 2-컬럼 행 --- */
+  .cam-chart-row {
+    display: grid;
+    grid-template-columns: 1fr 2fr;   /* 카메라 1/3, 그래프 2/3 (직전 50:50 → 카메라 폭 2/3 축소) */
+    gap: 12px;
+  }
+  .cam-chart-row .cam-card {
+    height: 360px;             /* chart-card 와 동일 높이로 좌우 정렬 */
+    display: flex;
+    flex-direction: column;
+  }
+  .cam-chart-row .cam-card .cam-wrap {
+    flex: 1;                   /* 헤더와 fps 메타를 제외한 공간을 카메라 영상이 차지 */
+    min-height: 0;
+    width: 100%;
+    height: auto;
+    aspect-ratio: auto;        /* flex 가 결정한 크기를 그대로 사용 (편지지처럼 letterbox 됨) */
+  }
+  @media (max-width: 900px) {
+    /* 화면이 좁으면 위아래 1-컬럼으로 떨어짐 */
+    .cam-chart-row { grid-template-columns: 1fr; }
+    .cam-chart-row .cam-card { height: auto; }
+    .cam-chart-row .cam-card .cam-wrap { aspect-ratio: 4 / 3; }
+  }
+
+  /* --- 라이브 스트립: 카메라(작게) + 경과시간 + 외/내측 모터속도 한 줄 --- */
+  .live-strip {
+    background: var(--surface);
+    border-radius: var(--radius);
+    border: 1px solid #2a2a4a;
+    padding: 1px 10px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .live-strip .cam-wrap.cam-mini {
+    --cam-aspect-ratio: 4 / 3;
+    height: 150px;        /* 직전 15px → 10배. 카메라 화면이 실제로 보이도록. */
+    width: auto;          /* 높이 + aspect-ratio 만으로 폭 결정 */
+    min-width: 200px;
+    aspect-ratio: var(--cam-aspect-ratio);
+    margin: 0;
+    flex-shrink: 0;
+  }
+  .live-strip .cam-mini .placeholder { font-size: 0.85em; line-height: 1; }
+  .live-strip .cam-toggle {
+    flex-shrink: 0;
+    padding: 4px 12px;
+    font-size: 0.95em;
+    line-height: 1;
+  }
+  .live-strip .live-metric {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    padding: 0 6px;
+  }
+  .live-strip .live-metric .lbl {
+    font-size: 0.95em;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .live-strip .live-metric .val {
+    font-size: 2.2em;        /* 카메라 150px 높이에 맞춰 적당히 — 약 35px */
+    font-weight: 700;
+    font-family: 'Consolas', monospace;
+    line-height: 1;
+  }
+  .live-strip .live-metric .unit {
+    font-size: 0.85em;
+    color: var(--text-dim);
+  }
+  .cam-strip-meta { font-size: 0.85em !important; }
+  .cam-strip-meta {
+    margin-left: auto;
+    font-size: 0.72em;
+    color: var(--text-dim);
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Clinostat Controller</h1>
+  <div class="status-bar">
+    <span><span class="status-dot" id="dotAC"></span>AC Servo</span>
+    <span><span class="status-dot" id="dotBLDC"></span>BLDC</span>
+    <span><span class="status-dot" id="dotSensor"></span>Sensor</span>
+    <span><span class="status-dot" id="dotLoop"></span>Control Loop</span>
+    <a href="/static/mobile.html" style="color: var(--blue); text-decoration: none; font-size: 0.85em;">📱 Mobile</a>
+  </div>
+</header>
+
+<div class="main">
+  <!-- ====== 좌측 패널 ====== -->
+  <div class="panel">
+
+    <!-- 포트 연결 -->
+    <div class="card">
+      <h3>Connection</h3>
+
+      <button class="btn-refresh" onclick="autoDetect()" style="width:100%; margin-bottom:12px; padding:8px;">🔄 자동 감지 (Auto-detect)</button>
+
+      <!-- AC Servo -->
+      <div style="margin-bottom:14px">
+        <div style="font-size:0.85em; font-weight:600; margin-bottom:6px; color:var(--blue);">AC Servo (Outer)</div>
+        <div class="form-row">
+          <label>Port</label>
+          <select id="acPort"></select>
+        </div>
+        <div class="form-row">
+          <label>Baudrate</label>
+          <select id="acBaud">
+            <option value="2400">2400</option>
+            <option value="4800">4800</option>
+            <option value="9600">9600</option>
+            <option value="19200">19200</option>
+            <option value="38400" selected>38400</option>
+            <option value="57600">57600</option>
+            <option value="115200">115200</option>
+          </select>
+        </div>
+        <div class="btn-row">
+          <button class="btn-connect" id="btnAcConn" onclick="connectAC()">Connect</button>
+          <button class="btn-disconnect" id="btnAcDisc" onclick="disconnectAC()" disabled>Disconnect</button>
+          <button class="btn-test" onclick="commTestAC()">Test</button>
+        </div>
+      </div>
+
+      <!-- BLDC -->
+      <div style="margin-bottom:14px">
+        <div style="font-size:0.85em; font-weight:600; margin-bottom:6px; color:var(--green);">BLDC (Inner)</div>
+        <div class="form-row">
+          <label>Port</label>
+          <select id="bldcPort"></select>
+        </div>
+        <div class="form-row">
+          <label>Baudrate</label>
+          <select id="bldcBaud">
+            <option value="9600">9600</option>
+            <option value="19200">19200</option>
+            <option value="38400">38400</option>
+            <option value="57600">57600</option>
+            <option value="115200">115200</option>
+            <option value="230400" selected>230400</option>
+            <option value="460800">460800</option>
+            <option value="921600">921600</option>
+          </select>
+        </div>
+        <div class="btn-row">
+          <button class="btn-connect" id="btnBldcConn" onclick="connectBLDC()">Connect</button>
+          <button class="btn-disconnect" id="btnBldcDisc" onclick="disconnectBLDC()" disabled>Disconnect</button>
+          <button class="btn-test" onclick="commTestBLDC()">Test</button>
+        </div>
+      </div>
+
+      <!-- Sensor -->
+      <div>
+        <div style="font-size:0.85em; font-weight:600; margin-bottom:6px; color:var(--accent);">Sensor (IMU)</div>
+        <div class="form-row">
+          <label>Port</label>
+          <select id="sensorPort"></select>
+        </div>
+        <div class="form-row">
+          <label>Baudrate</label>
+          <select id="sensorBaud">
+            <option value="9600">9600</option>
+            <option value="115200" selected>115200</option>
+            <option value="230400">230400</option>
+          </select>
+        </div>
+        <div class="btn-row">
+          <button class="btn-connect" id="btnSensConn" onclick="connectSensor()">Connect</button>
+          <button class="btn-disconnect" id="btnSensDisc" onclick="disconnectSensor()" disabled>Disconnect</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Operation Condition</h3>
+      <div id="operationConditionRoot"></div>
+    </div>
+
+    <details class="card manual-op-card">
+      <summary class="manual-op-summary">Manual Operation <span class="chev">▾</span></summary>
+      <div id="manualControlRoot"></div>
+      <div class="func-desc" style="margin-top:8px">
+        Outer axis 와 Inner axis 는 독립적으로 start/stop 합니다. 수동 운전 시 선택된 operation condition 은 비활성화됩니다.
+      </div>
+    </details>
+
+    <button class="btn-stop" id="btnStopAll" onclick="stopAllMotion()">STOP ALL</button>
+
+  </div>
+
+  <!-- ====== 우측 모니터 ====== -->
+  <div class="monitor">
+
+    <!-- 카메라(좌) + RPM 그래프(우) 를 2-컬럼 grid 로 나란히 -->
+    <div class="cam-chart-row">
+      <div class="cam-card">
+        <h3>
+          <span>🎥 Camera (Live)</span>
+          <button class="cam-toggle off" id="camToggle" onclick="toggleCamera()">▶ ON</button>
+        </h3>
+        <div class="cam-wrap">
+          <img id="camImg" alt="">
+          <div class="placeholder" id="camPlaceholder">카메라 OFF — "▶ ON" 으로 시작</div>
+        </div>
+        <div class="cam-meta">
+          <span id="camMeta" hidden></span>
+          <span id="camFps">—</span>
+        </div>
+      </div>
+
+      <div class="chart-card">
+        <canvas id="speedChart"></canvas>
+        <!-- 실시간 메트릭: 시간 / 외측(AC) / 내측(BLDC) — 1행 3컬럼 -->
+        <div class="chart-footer">
+          <div class="cf-metric">
+            <span class="lbl">Time</span>
+            <span class="val time-color" id="valTime">0.0</span>
+            <span class="unit">s</span>
+          </div>
+          <div class="cf-metric">
+            <span class="lbl">Outer</span>
+            <span class="val outer-color" id="valOuter">0</span>
+            <span class="unit">rpm</span>
+          </div>
+          <div class="cf-metric">
+            <span class="lbl">Inner</span>
+            <span class="val inner-color" id="valInner">0</span>
+            <span class="unit">rpm</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="sensor-grid">
+      <div class="sensor-card">
+        <div class="label">Roll</div>
+        <div class="value" id="valRoll">0.00</div>
+      </div>
+      <div class="sensor-card">
+        <div class="label">Pitch</div>
+        <div class="value" id="valPitch">0.00</div>
+      </div>
+      <div class="sensor-card">
+        <div class="label">Yaw</div>
+        <div class="value" id="valYaw">0.00</div>
+      </div>
+      <div class="sensor-card">
+        <div class="label">Accel X (g)</div>
+        <div class="value" id="valAx">0.00</div>
+      </div>
+      <div class="sensor-card">
+        <div class="label">Accel Y (g)</div>
+        <div class="value" id="valAy">0.00</div>
+      </div>
+      <div class="sensor-card">
+        <div class="label">Accel Z (g)</div>
+        <div class="value" id="valAz">0.00</div>
+      </div>
+      <div class="sensor-card">
+        <div class="label">Gyro X (deg/s)</div>
+        <div class="value" id="valWx">0.00</div>
+      </div>
+      <div class="sensor-card">
+        <div class="label">Gyro Y (deg/s)</div>
+        <div class="value" id="valWy">0.00</div>
+      </div>
+      <div class="sensor-card">
+        <div class="label">Gyro Z (deg/s)</div>
+        <div class="value" id="valWz">0.00</div>
+      </div>
+    </div>
+
+    <!-- ====== 논문 메트릭 (실시간) ====== -->
+    <div class="metrics-grid">
+      <!-- I(5°) 게이지 -->
+      <div class="metric-paper">
+        <h4>I(5°) — 극관 집중도 <span class="target">target ≈ 1.0</span></h4>
+        <div class="body">
+          <div class="I5-gauge">
+            <div class="col">
+              <div class="lbl">cmd (모터 각도)</div>
+              <div class="val" id="I5cmd">—</div>
+              <div class="lbl">samples: <span id="NcmdI">0</span></div>
+            </div>
+            <div class="col">
+              <div class="lbl">meas (IMU)</div>
+              <div class="val" id="I5meas">—</div>
+              <div class="lbl">samples: <span id="NmeasI">0</span></div>
+            </div>
+          </div>
+          <div class="summary-row">
+            <div class="pair"><div class="k">D_std cmd</div><div class="v" id="Dstdcmd">—</div></div>
+            <div class="pair"><div class="k">D_std meas</div><div class="v" id="Dstdmeas">—</div></div>
+            <div class="pair"><div class="k">χ² cmd</div><div class="v" id="chi2cmd">—</div></div>
+            <div class="pair"><div class="k">χ² meas</div><div class="v" id="chi2meas">—</div></div>
+          </div>
+          <div style="margin-top:10px; font-size:0.72em; color: var(--text-dim);">
+            논문 권장값 — Fibonacci: I≈1.17, D_std≈0.087.
+            Adaptive blend: I≈0.99, D_std≈0.385.
+          </div>
+        </div>
+      </div>
+
+      <!-- 9-band D 막대그래프 -->
+      <div class="metric-paper">
+        <h4>D[θ₁,θ₂] — 9개 위도밴드 밀도 <span class="target">target D = 1</span></h4>
+        <div class="body"><canvas id="bandChart"></canvas></div>
+      </div>
+
+      <!-- taSMG 시계열 -->
+      <div class="metric-paper">
+        <h4>taSMG — ‖ḡ(t)‖ <span class="target">target &lt; 10⁻³ G</span></h4>
+        <div class="body"><canvas id="tasmgChart"></canvas></div>
+      </div>
+
+      <!-- 단위구 산점도 (Plotly) -->
+      <div class="metric-paper">
+        <h4>중력벡터 분포 (단위구) <span class="target">
+          <select id="sphereSrc" style="background:transparent; color:var(--orange); border:1px solid #444; padding:1px 4px; font-size:0.95em;">
+            <option value="cmd">cmd</option>
+            <option value="meas">meas</option>
+          </select>
+        </span></h4>
+        <div class="body"><div id="sphereDiv"></div></div>
+      </div>
+    </div>
+
+    <div style="display:flex; gap:8px; margin-top:8px;">
+      <button class="btn-connect" onclick="saveRun()">💾 결과 JSON 저장 (runs/)</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ====== API 호출 유틸 ======
+const API = '';
+async function api(method, path, body) {
+  const opts = { method, headers: { 'Content-Type': 'application/json' } };
+  if (body) opts.body = JSON.stringify(body);
+  const r = await fetch(API + path, opts);
+  return r.json();
+}
+
+// ====== 포트 목록 ======
+async function refreshPorts() {
+  const { ports } = await api('GET', '/api/ports');
+  const detected = await api('GET', '/api/ports/detect');
+  const autoMap = { acPort: detected.ac_servo, bldcPort: detected.bldc, sensorPort: detected.sensor };
+  ['acPort', 'bldcPort', 'sensorPort'].forEach(id => {
+    const sel = document.getElementById(id);
+    const prev = sel.value;
+    sel.innerHTML = '';
+    ports.forEach(p => {
+      const opt = document.createElement('option');
+      opt.value = p;
+      opt.textContent = (p === autoMap[id]) ? `${p} ✓ 자동감지` : p;
+      sel.appendChild(opt);
+    });
+    // 자동 감지된 포트 우선, 없으면 이전값 유지
+    if (autoMap[id] && ports.includes(autoMap[id])) sel.value = autoMap[id];
+    else if (ports.includes(prev)) sel.value = prev;
+  });
+}
+
+async function autoDetect() {
+  const detected = await api('GET', '/api/ports/detect');
+  await refreshPorts();
+  const msg = [
+    `AC Servo: ${detected.ac_servo || '없음'}`,
+    `BLDC: ${detected.bldc || '없음'}`,
+    `Sensor: ${detected.sensor || '없음'}`,
+  ].join('\n');
+  alert('자동 감지 결과:\n\n' + msg);
+}
+
+// ====== 연결 / 해제 ======
+async function connectAC() {
+  const r = await api('POST', '/api/ac/connect', {
+    port: document.getElementById('acPort').value,
+    baudrate: parseInt(document.getElementById('acBaud').value)
+  });
+  if (r.ok) {
+    document.getElementById('dotAC').classList.add('on');
+    document.getElementById('btnAcConn').disabled = true;
+    document.getElementById('btnAcDisc').disabled = false;
+  } else alert('AC 연결 실패: ' + r.error);
+}
+
+async function disconnectAC() {
+  await api('POST', '/api/ac/disconnect');
+  document.getElementById('dotAC').classList.remove('on');
+  document.getElementById('btnAcConn').disabled = false;
+  document.getElementById('btnAcDisc').disabled = true;
+}
+
+async function connectBLDC() {
+  const r = await api('POST', '/api/bldc/connect', {
+    port: document.getElementById('bldcPort').value,
+    baudrate: parseInt(document.getElementById('bldcBaud').value)
+  });
+  if (r.ok) {
+    document.getElementById('dotBLDC').classList.add('on');
+    document.getElementById('btnBldcConn').disabled = true;
+    document.getElementById('btnBldcDisc').disabled = false;
+  } else alert('BLDC 연결 실패: ' + r.error);
+}
+
+async function disconnectBLDC() {
+  await api('POST', '/api/bldc/disconnect');
+  document.getElementById('dotBLDC').classList.remove('on');
+  document.getElementById('btnBldcConn').disabled = false;
+  document.getElementById('btnBldcDisc').disabled = true;
+}
+
+async function connectSensor() {
+  const r = await api('POST', '/api/sensor/connect', {
+    port: document.getElementById('sensorPort').value,
+    baudrate: parseInt(document.getElementById('sensorBaud').value)
+  });
+  if (r.ok) {
+    document.getElementById('dotSensor').classList.add('on');
+    document.getElementById('btnSensConn').disabled = true;
+    document.getElementById('btnSensDisc').disabled = false;
+  } else alert('센서 연결 실패: ' + r.error);
+}
+
+async function disconnectSensor() {
+  await api('POST', '/api/sensor/disconnect');
+  document.getElementById('dotSensor').classList.remove('on');
+  document.getElementById('btnSensConn').disabled = false;
+  document.getElementById('btnSensDisc').disabled = true;
+}
+
+async function commTestAC() {
+  const r = await api('POST', '/api/ac/comm-test');
+  alert(r.ok ? 'AC 응답: ' + r.response + ' (' + r.length + ' bytes)' : 'AC 통신 실패');
+}
+
+async function diagnoseAC() {
+  alert('심층 진단을 실행합니다.\nbaudrate × slave ID 조합을 테스트합니다.\n잠시 기다려주세요...');
+  const r = await api('POST', '/api/ac/diagnose');
+  let msg = `Port: ${r.port}\n`;
+  msg += `Passive data (장치가 보낸 데이터): ${r.passive_data || 'none'}\n\n`;
+
+  if (r.found) {
+    msg += `=== 통신 성공! ===\n`;
+    msg += `Baudrate: ${r.match.baudrate}\n`;
+    msg += `Slave ID: ${r.match.slave_id}\n`;
+    msg += `Response: ${r.match.response}\n`;
+  } else {
+    msg += `${r.tested}개 조합 테스트 완료\n`;
+    msg += r.message + '\n\n';
+    msg += '확인사항:\n';
+    msg += '1. 장치 전원이 켜져 있는지\n';
+    msg += '2. USB 케이블이 데이터 케이블인지 (충전 전용 아닌지)\n';
+    msg += '3. 이 포트가 맞는 장치인지\n';
+  }
+  alert(msg);
+}
+
+async function commTestBLDC() {
+  const r = await api('POST', '/api/bldc/comm-test');
+  alert(r.ok ? 'BLDC 응답: ' + r.response : 'BLDC 통신 실패');
+}
+
+const RAD_S_TO_RPM = 60.0 / (2 * Math.PI);
+const DEFAULT_CONTROL_CONFIG = {
+  outer: { enabled: false, func_type: 'constant', base_speed: 5, amplitude: 0, period: 10 },
+  inner: { enabled: false, func_type: 'constant', base_speed: 20, amplitude: 0, period: 10 },
+};
+// maxRpm: Manual Operation 입력 상한 (양/음 대칭, ±maxRpm). 서버 direct_control_speed_guard 한도와 일치.
+const AXIS_META = {
+  outer: { title: 'Outer Axis (AC Servo)', color: 'var(--blue)', maxRpm: 10, step: 0.1, ampStep: 0.1 },
+  inner: { title: 'Inner Axis (BLDC)', color: 'var(--green)', maxRpm: 30, step: 0.5, ampStep: 0.5 },
+};
+const PARAM_LABELS = {
+  inner_rad_s: 'inner_rad_s',
+  outer_rad_s: 'outer_rad_s',
+  w_min: 'w_min',
+  w_max: 'w_max',
+  w2_base: 'w2_base',
+  w2_min: 'w2_min',
+  t_switch_s: 't_switch_s',
+  alpha: 'alpha',
+  N_points: 'N_points',
+  T_dwell_s: 'T_dwell_s',
+};
+const appState = {
+  running: false,
+  selectedStrategy: '',
+  activeStrategy: '',
+  activeStrategyParams: {},
+  strategyParams: {},
+  strategies: [],
+  strategyMap: {},
+  controlConfig: cloneData(DEFAULT_CONTROL_CONFIG),
+  supervisionAck: false,
+};
+
+function toggleSupervisionAck(checked) {
+  setAppState({ supervisionAck: Boolean(checked) });
+}
+
+function cloneData(data) {
+  return JSON.parse(JSON.stringify(data));
+}
+
+function setAppState(patch) {
+  Object.assign(appState, patch);
+  renderReactiveSections();
+}
+
+function currentStrategyMeta() {
+  return appState.strategyMap[appState.selectedStrategy] || null;
+}
+
+function strategyMetaByName(name) {
+  return appState.strategyMap[name] || null;
+}
+
+function formatParamLabel(key) {
+  return PARAM_LABELS[key] || key;
+}
+
+function formatParamValue(value) {
+  const num = Number(value);
+  return Number.isFinite(num) ? String(num) : String(value);
+}
+
+function formatMathNumber(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return String(value ?? '?');
+  return num.toFixed(3).replace(/\.?0+$/, '');
+}
+
+function buildRenderedFormulaLines(strategy, params, evaluate = false) {
+  if (!strategy) return [];
+  if (!evaluate) return strategy.formula || [];
+
+  const p = params || {};
+  const val = (key, fallback = '?') => key in p ? formatMathNumber(p[key]) : fallback;
+  switch (strategy.name) {
+    case 'constant':
+      return [
+        `ω₂ = ${val('outer_rad_s')} rad/s`,
+        `ω₁ = ${val('inner_rad_s')} rad/s`,
+      ];
+    case 'reciprocal_sinusoidal':
+      return [
+        `ω₂ = ${val('w2_base')} rad/s`,
+        `ω₁(θ) = min(${val('w_min')} / |cos θ|, ${val('w_max')}) rad/s`,
+      ];
+    case 'halton':
+      return [
+        `ω₂ = ${val('w2_base')} rad/s`,
+        `ω₁(θ) = sgn(Δθ) · clip(|Δθ| / 0.02, ${val('w_min')}, ${val('w_max')}) rad/s`,
+      ];
+    case 'adaptive_blend':
+      return [
+        `ω₂ = ${val('w2_base')} rad/s`,
+        `ω₁(θ,t) = { Halton, frac(t / ${val('t_switch_s')}) < ${val('alpha')} ; min(${val('w_min')} / |cos θ|, ${val('w_max')}), otherwise }`,
+      ];
+    case 'fibonacci_lattice_dwell':
+      return [
+        `ω₂ = ${val('w2_base')} rad/s`,
+        `ω₁(θ) = sgn(Δθ) · clip(|Δθ| / 0.02, ${val('w_min')}, ${val('w_max')}) rad/s`,
+        `dwell: N = ${val('N_points')} points, T_dwell = ${val('T_dwell_s')} s`,
+      ];
+    case 'motor2_comodulation':
+      return [
+        `ω₂(θ) = max(${val('w2_base')} · |cos θ|, ${val('w2_min')}) rad/s`,
+        `ω₁(θ) = min(${val('w_min')} / |cos θ|, ${val('w_max')}) rad/s`,
+      ];
+    default:
+      return strategy.formula || [];
+  }
+}
+
+function renderStrategyFormulaBlock(title, strategy, params, accent = 'var(--blue)', evaluate = false) {
+  if (!strategy) return '';
+  const paramEntries = Object.entries(params || {});
+  const paramText = paramEntries.length > 0
+    ? paramEntries.map(([key, value]) => `${formatParamLabel(key)}=${formatParamValue(value)}`).join(', ')
+    : 'preset';
+  const lines = buildRenderedFormulaLines(strategy, params, evaluate);
+  return `
+    <div class="func-desc" style="margin-top:8px; border-left:3px solid ${accent}">
+      <div style="font-weight:600; margin-bottom:4px;">${title}</div>
+      ${lines.map((line) => `<div>${line}</div>`).join('')}
+      <div style="margin-top:6px; color:var(--text-dim)">params: ${paramText}</div>
+    </div>
+  `;
+}
+
+function formatAxisExpression(axisKey, cfg) {
+  const omega = axisKey === 'outer' ? 'ω₂' : 'ω₁';
+  const base = Number(cfg.base_speed || 0);
+  const amp = Number(cfg.amplitude || 0);
+  const period = Number(cfg.period || 0);
+  switch (cfg.func_type) {
+    case 'sine':
+      return `${omega}(t) = ${base.toFixed(2)} + ${amp.toFixed(2)}·sin(2πt/${period.toFixed(2)}) rpm`;
+    case 'triangle':
+      return `${omega}(t) = ${base.toFixed(2)} + ${amp.toFixed(2)}·triangle(t/${period.toFixed(2)}) rpm`;
+    case 'square':
+      return `${omega}(t) = ${base.toFixed(2)} + ${amp.toFixed(2)}·square(t/${period.toFixed(2)}) rpm`;
+    case 'sawtooth':
+      return `${omega}(t) = ${base.toFixed(2)} + ${amp.toFixed(2)}·sawtooth(t/${period.toFixed(2)}) rpm`;
+    default:
+      return `${omega}(t) = ${base.toFixed(2)} rpm`;
+  }
+}
+
+function renderOperationCondition() {
+  const strategy = currentStrategyMeta();
+  const activeMeta = strategyMetaByName(appState.activeStrategy);
+  const options = [
+    '<option value="">— Select Condition —</option>',
+    ...appState.strategies.map((s) => {
+      const star = s.name === 'fibonacci_lattice_dwell' ? '★ ' : '';
+      const selected = s.name === appState.selectedStrategy ? 'selected' : '';
+      return `<option value="${s.name}" ${selected}>${star}${s.name}</option>`;
+    }),
+  ].join('');
+
+  const desc = strategy
+    ? strategy.description
+    : '조건을 선택하면 해당 전략식과 편집 가능한 변수가 아래에 표시됩니다.';
+  const selected = appState.selectedStrategy
+    ? `<div class="func-desc" style="margin-top:8px; border-left:3px solid var(--blue)">Selected: ${appState.selectedStrategy}</div>`
+    : '';
+  const active = appState.activeStrategy
+    ? `<div class="func-desc" style="margin-top:8px; border-left:3px solid var(--green)">Active: ${appState.activeStrategy}</div>`
+    : '';
+  const appliedFormula = activeMeta
+    ? renderStrategyFormulaBlock(`Applied Formula: ${appState.activeStrategy}`, activeMeta, appState.activeStrategyParams, 'var(--green)', true)
+    : '';
+  const formula = strategy
+    ? renderStrategyFormulaBlock('Editable Formula', strategy, appState.strategyParams, 'var(--blue)', true)
+    : '';
+  const params = strategy
+    ? Object.entries(appState.strategyParams).map(([key, value]) => `
+        <div class="form-row">
+          <label>${formatParamLabel(key)}</label>
+          <input
+            type="number"
+            value="${value}"
+            step="any"
+            onchange="updateStrategyParam('${key}', this.value)"
+          >
+        </div>
+      `).join('')
+    : '<div class="func-desc" style="margin-top:8px">수동 운전 중에는 condition이 비활성화되며, 값은 유지됩니다.</div>';
+
+  const ackChecked = appState.supervisionAck ? 'checked' : '';
+  return `
+    <div class="form-row">
+      <label>Condition</label>
+      <select onchange="selectOperationCondition(this.value)">${options}</select>
+    </div>
+    <div class="func-desc" style="min-height:30px">${desc}</div>
+    ${selected}
+    ${formula}
+    ${active}
+    ${appliedFormula}
+    <div style="margin-top:8px">${params}</div>
+    <label style="display:flex; align-items:flex-start; gap:8px; margin-top:10px; padding:8px; border:1px solid #2a2a4a; border-radius:6px; font-size:0.85em; cursor:pointer;">
+      <input type="checkbox" ${ackChecked} onchange="toggleSupervisionAck(this.checked)" style="margin-top:3px;">
+      <span>안전 확인: 감독자가 입회 중이며 IMU는 sample_platform에 장착되어 있습니다.</span>
+    </label>
+    <div class="btn-row">
+      <button class="btn-connect" onclick="applyOperationCondition(false)">Apply</button>
+      <button class="btn-test" onclick="applyOperationCondition(true)">Run</button>
+      <button class="btn-disconnect" onclick="clearOperationCondition()">Clear</button>
+    </div>
+  `;
+}
+
+function renderManualAxis(axisKey) {
+  const cfg = appState.controlConfig[axisKey];
+  const meta = AXIS_META[axisKey];
+  const isEnabled = cfg.enabled;
+  const funcOptions = ['constant', 'sine', 'triangle', 'square', 'sawtooth']
+    .map((name) => `<option value="${name}" ${cfg.func_type === name ? 'selected' : ''}>${name}</option>`)
+    .join('');
+  const status = isEnabled ? 'running' : 'stopped';
+  return `
+    <div style="border:1px solid #2a2a4a; border-radius:8px; padding:12px; margin-top:10px;">
+      <div style="font-size:0.85em; font-weight:600; margin-bottom:8px; color:${meta.color};">${meta.title}</div>
+      <div class="func-desc" style="margin-bottom:8px">Status: ${status}</div>
+      <div class="form-row">
+        <label>Function</label>
+        <select onchange="updateManualAxisField('${axisKey}', 'func_type', this.value)">${funcOptions}</select>
+      </div>
+      <div class="form-row">
+        <label>Base (rpm)</label>
+        <input type="number" value="${cfg.base_speed}" min="-${meta.maxRpm}" max="${meta.maxRpm}" step="${meta.step}" onchange="updateManualAxisField('${axisKey}', 'base_speed', this.value)">
+      </div>
+      <div class="form-row">
+        <label>Amplitude</label>
+        <input type="number" value="${cfg.amplitude}" min="0" max="${meta.maxRpm}" step="${meta.ampStep}" onchange="updateManualAxisField('${axisKey}', 'amplitude', this.value)">
+      </div>
+      <div class="form-row">
+        <label>Period (s)</label>
+        <input type="number" value="${cfg.period}" min="0.1" max="600" step="0.1" onchange="updateManualAxisField('${axisKey}', 'period', this.value)">
+      </div>
+      <div class="func-desc">${formatAxisExpression(axisKey, cfg)}</div>
+      <div class="btn-row">
+        <button class="btn-connect" onclick="runManualAxis('${axisKey}')">Run ${axisKey}</button>
+        <button class="btn-disconnect" onclick="stopManualAxis('${axisKey}')">Stop ${axisKey}</button>
+      </div>
+    </div>
+  `;
+}
+
+function renderManualControl() {
+  return renderManualAxis('outer') + renderManualAxis('inner');
+}
+
+function renderReactiveSections() {
+  document.getElementById('operationConditionRoot').innerHTML = renderOperationCondition();
+  document.getElementById('manualControlRoot').innerHTML = renderManualControl();
+  document.getElementById('dotLoop').classList.toggle('on', appState.running);
+}
+
+function normaliseControlConfig(config) {
+  const merged = cloneData(DEFAULT_CONTROL_CONFIG);
+  if (config?.outer) Object.assign(merged.outer, config.outer);
+  if (config?.inner) Object.assign(merged.inner, config.inner);
+  merged.outer.enabled = Boolean(merged.outer.enabled);
+  merged.inner.enabled = Boolean(merged.inner.enabled);
+  return merged;
+}
+
+const SUPERVISION_ACK_TOKEN = 'HUMAN_SUPERVISED_LIVE_MOTION';
+const IMU_MOUNT_CONFIRMATION_TOKEN = 'HUMAN_CONFIRMED_SAMPLE_PLATFORM';
+
+function notifySupervisionMessage(message) {
+  if (typeof toast === 'function') toast(message, 3600);
+  else alert(message);
+}
+
+function withSupervisionAck(config) {
+  if (!appState.supervisionAck) {
+    notifySupervisionMessage('안전 확인 체크박스를 먼저 체크하세요 (감독자 입회 + IMU sample_platform 장착)');
+    return null;
+  }
+  return {
+    ...cloneData(config),
+    supervision_ack: true,
+    supervision_token: SUPERVISION_ACK_TOKEN,
+    supervisor: 'operator',
+    imu_mount_location: 'sample_platform',
+    imu_mount_confirmation: IMU_MOUNT_CONFIRMATION_TOKEN,
+  };
+}
+
+function selectOperationCondition(name) {
+  const strategy = appState.strategyMap[name];
+  setAppState({
+    selectedStrategy: name,
+    strategyParams: cloneData(strategy?.params || {}),
+  });
+}
+
+function updateStrategyParam(key, value) {
+  const next = cloneData(appState.strategyParams);
+  next[key] = Number(value);
+  setAppState({ strategyParams: next });
+}
+
+function updateManualAxisField(axisKey, field, value) {
+  const next = cloneData(appState.controlConfig);
+  if (field === 'func_type') {
+    next[axisKey][field] = value;
+  } else {
+    let v = Number(value);
+    const meta = AXIS_META[axisKey];
+    if (Number.isFinite(v) && meta) {
+      // HTML5 min/max 우회 입력을 코드 레벨에서도 ±maxRpm 으로 클램프
+      if (field === 'base_speed')      v = Math.max(-meta.maxRpm, Math.min(meta.maxRpm, v));
+      else if (field === 'amplitude')  v = Math.max(0,            Math.min(meta.maxRpm, v));
+      else if (field === 'period')     v = Math.max(0.1,          Math.min(600,         v));
+    }
+    next[axisKey][field] = v;
+  }
+  setAppState({ controlConfig: next });
+}
+
+async function applyOperationCondition(runAfter = false) {
+  if (!appState.selectedStrategy) {
+    alert('조건을 선택하세요.');
+    return;
+  }
+  const r = await api('POST', '/api/strategy', {
+    name: appState.selectedStrategy,
+    params: appState.strategyParams,
+  });
+  if (!r.ok) {
+    alert('조건 적용 실패: ' + r.error);
+    return;
+  }
+  if (runAfter && !appState.running) {
+    const supervisedConfig = withSupervisionAck(appState.controlConfig);
+    if (!supervisedConfig) return;
+    const startResp = await api('POST', '/api/control/start', supervisedConfig);
+    if (!startResp.ok) {
+      alert('조건 실행 실패: ' + (startResp.error || '원인 미상'));
+      return;
+    }
+  }
+  setAppState({
+    activeStrategy: appState.selectedStrategy,
+    activeStrategyParams: cloneData(appState.strategyParams),
+    running: runAfter ? true : appState.running,
+  });
+}
+
+async function clearOperationCondition() {
+  await api('POST', '/api/strategy', { name: '', params: {} });
+  const hasEnabledAxis = appState.controlConfig.outer.enabled || appState.controlConfig.inner.enabled;
+  if (!hasEnabledAxis && appState.running) {
+    await api('POST', '/api/control/stop');
+  }
+  setAppState({
+    selectedStrategy: '',
+    activeStrategy: '',
+    activeStrategyParams: {},
+    strategyParams: {},
+    running: hasEnabledAxis ? appState.running : false,
+  });
+}
+
+async function syncManualOperation(nextConfig) {
+  if (appState.activeStrategy) {
+    await api('POST', '/api/strategy', { name: '', params: {} });
+  }
+  const hasEnabledAxis = nextConfig.outer.enabled || nextConfig.inner.enabled;
+  if (hasEnabledAxis) {
+    const path = appState.running ? '/api/control/config' : '/api/control/start';
+    const supervisedConfig = withSupervisionAck(nextConfig);
+    if (!supervisedConfig) return;
+    const r = await api('POST', path, supervisedConfig);
+    if (!r.ok) {
+      alert('수동 운전 적용 실패: ' + (r.error || '원인 미상'));
+      return;
+    }
+  } else if (appState.running) {
+    await api('POST', '/api/control/stop');
+  }
+  setAppState({
+    controlConfig: nextConfig,
+    running: hasEnabledAxis,
+    activeStrategy: '',
+    activeStrategyParams: {},
+  });
+}
+
+async function runManualAxis(axisKey) {
+  const next = cloneData(appState.controlConfig);
+  next[axisKey].enabled = true;
+  await syncManualOperation(next);
+}
+
+async function stopManualAxis(axisKey) {
+  const next = cloneData(appState.controlConfig);
+  next[axisKey].enabled = false;
+  await syncManualOperation(next);
+}
+
+async function stopAllMotion() {
+  await api('POST', '/api/control/stop');
+  const next = cloneData(appState.controlConfig);
+  next.outer.enabled = false;
+  next.inner.enabled = false;
+  setAppState({
+    running: false,
+    controlConfig: next,
+  });
+}
+
+async function refreshStrategies() {
+  const r = await api('GET', '/api/strategies');
+  const strategyMap = {};
+  r.strategies.forEach((strategy) => {
+    strategyMap[strategy.name] = strategy;
+  });
+  setAppState({
+    strategies: r.strategies,
+    strategyMap,
+    selectedStrategy: appState.selectedStrategy || r.current || '',
+  });
+  if (!appState.strategyParams || Object.keys(appState.strategyParams).length === 0) {
+    const current = strategyMap[appState.selectedStrategy || r.current || ''];
+    setAppState({ strategyParams: cloneData(current?.params || {}) });
+  }
+}
+
+async function saveRun() {
+  const r = await api('POST', '/api/run/save');
+  if (r.ok) alert('저장됨: ' + r.path);
+  else alert('저장 실패');
+}
+
+// ====== Chart.js 실시간 차트 ======
+const MAX_POINTS = 200;  // 10초분 (20Hz * 10)
+const chartData = {
+  labels: [],
+  datasets: [
+    {
+      label: 'Outer (AC Servo)',
+      data: [],
+      borderColor: '#4cc9f0',
+      borderWidth: 2,
+      pointRadius: 0,
+      tension: 0.3,
+    },
+    {
+      label: 'Inner (BLDC)',
+      data: [],
+      borderColor: '#0cca4a',
+      borderWidth: 2,
+      pointRadius: 0,
+      tension: 0.3,
+    }
+  ]
+};
+
+const chart = new Chart(document.getElementById('speedChart'), {
+  type: 'line',
+  data: chartData,
+  options: {
+    responsive: true,
+    maintainAspectRatio: false,
+    animation: false,
+    scales: {
+      x: {
+        display: true,
+        title: { display: true, text: 'Time (s)', color: '#999' },
+        ticks: { color: '#666', maxTicksLimit: 10 },
+        grid: { color: '#2a2a4a' },
+      },
+      y: {
+        display: true,
+        title: { display: true, text: 'RPM (출력축)', color: '#999' },
+        ticks: { color: '#666' },
+        grid: { color: '#2a2a4a' },
+      }
+    },
+    plugins: {
+      legend: { labels: { color: '#ccc' } }
+    }
+  }
+});
+
+// ====== 메트릭 차트 (밴드, taSMG) ======
+const bandChartData = {
+  labels: ['0-10', '10-20', '20-30', '30-40', '40-50', '50-60', '60-70', '70-80', '80-90'],
+  datasets: [
+    { label: 'cmd', data: [0,0,0,0,0,0,0,0,0], backgroundColor: 'rgba(76, 201, 240, 0.7)' },
+    { label: 'meas', data: [0,0,0,0,0,0,0,0,0], backgroundColor: 'rgba(248, 150, 30, 0.7)' },
+  ]
+};
+const bandChart = new Chart(document.getElementById('bandChart'), {
+  type: 'bar',
+  data: bandChartData,
+  options: {
+    responsive: true,
+    maintainAspectRatio: false,
+    animation: false,
+    scales: {
+      x: { ticks: { color: '#888', font: { size: 9 } }, grid: { color: '#2a2a4a' },
+           title: { display: true, text: '|lat| band (°)', color: '#888', font:{size:10}} },
+      y: { ticks: { color: '#888' }, grid: { color: '#2a2a4a' },
+           title: { display: true, text: 'D (1 = ideal)', color: '#888', font:{size:10}},
+           min: 0, suggestedMax: 2.5 }
+    },
+    plugins: {
+      legend: { labels: { color: '#ccc', font: { size: 10 } } },
+      annotation: false,
+    }
+  }
+});
+
+const MAX_TASMG_PTS = 600;
+const tasmgData = {
+  labels: [],
+  datasets: [
+    { label: 'cmd |ḡ|', data: [], borderColor: '#4cc9f0', backgroundColor: 'transparent',
+      borderWidth: 1.5, pointRadius: 0 },
+    { label: 'meas |ḡ|', data: [], borderColor: '#f8961e', backgroundColor: 'transparent',
+      borderWidth: 1.5, pointRadius: 0 },
+    { label: '10⁻³ G', data: [], borderColor: '#888', borderDash: [4,4],
+      borderWidth: 1, pointRadius: 0 },
+  ]
+};
+const tasmgChart = new Chart(document.getElementById('tasmgChart'), {
+  type: 'line',
+  data: tasmgData,
+  options: {
+    responsive: true,
+    maintainAspectRatio: false,
+    animation: false,
+    scales: {
+      x: { ticks: { color: '#888', maxTicksLimit: 8, font:{size:9} },
+           grid: { color: '#2a2a4a' },
+           title: { display: true, text: 't (s)', color: '#888', font:{size:10}} },
+      y: { type: 'logarithmic',
+           ticks: { color: '#888', font:{size:9} },
+           grid: { color: '#2a2a4a' },
+           title: { display: true, text: '|ḡ| (G)', color: '#888', font:{size:10}},
+           min: 1e-4, max: 2 }
+    },
+    plugins: { legend: { labels: { color: '#ccc', font:{size:10} } } }
+  }
+});
+
+// 단위구 (Plotly) — 초기 빈 산점
+const sphereLayout = {
+  paper_bgcolor: '#16213e', plot_bgcolor: '#16213e',
+  margin: { l: 0, r: 0, t: 0, b: 0 },
+  scene: {
+    bgcolor: '#16213e',
+    xaxis: { range: [-1.1, 1.1], color: '#666', gridcolor: '#2a2a4a' },
+    yaxis: { range: [-1.1, 1.1], color: '#666', gridcolor: '#2a2a4a' },
+    zaxis: { range: [-1.1, 1.1], color: '#666', gridcolor: '#2a2a4a' },
+    aspectmode: 'cube',
+  },
+};
+Plotly.newPlot('sphereDiv', [{
+  type: 'scatter3d', mode: 'markers',
+  x: [], y: [], z: [],
+  marker: { size: 3, color: '#4cc9f0', opacity: 0.8 },
+}], sphereLayout, { displayModeBar: false, responsive: true });
+
+async function refreshSphere() {
+  const src = document.getElementById('sphereSrc').value;
+  try {
+    const r = await api('GET', `/api/sphere?source=${src}&max_points=800`);
+    if (!r.points || r.points.length === 0) return;
+    const x = r.points.map(p => p[0]);
+    const y = r.points.map(p => p[1]);
+    const z = r.points.map(p => p[2]);
+    const idx = r.points.map((_, i) => i);
+    Plotly.react('sphereDiv', [{
+      type: 'scatter3d', mode: 'markers',
+      x, y, z,
+      marker: { size: 3, color: idx, colorscale: 'Viridis', opacity: 0.85 },
+    }], sphereLayout, { displayModeBar: false, responsive: true });
+  } catch (e) {}
+}
+setInterval(refreshSphere, 2000);   // 2초마다 단위구 갱신
+
+function colorClassI5(v) {
+  if (v === null || v === undefined) return '';
+  const d = Math.abs(v - 1.0);
+  if (d < 0.2) return 'good';
+  if (d < 1.0) return 'warn';
+  return 'bad';
+}
+
+// ====== 카메라 (USB 웹캠 MJPEG) ======
+let camOn = false;
+let camFrameCount = 0;
+let camFpsTimer = null;
+let camAspectKey = '';
+let camNativeWidth = 640;
+let camNativeHeight = 480;
+let camResizeToken = 0;
+
+function resizeCameraFrame() {
+  // 라이브 스트립 모드: 크기는 CSS(height:72px + aspect-ratio)가 결정.
+  // 인라인 width/height 를 부여하지 않음 — applyCameraAspect 가
+  // --cam-aspect-ratio 변수만 갱신하면 종횡비는 자동으로 맞춰진다.
+}
+
+function scheduleCameraResize() {
+  if (camResizeToken) return;
+  camResizeToken = requestAnimationFrame(() => {
+    camResizeToken = 0;
+    resizeCameraFrame();
+  });
+}
+
+function applyCameraAspect(width, height) {
+  if (!width || !height) return;
+  camNativeWidth = width;
+  camNativeHeight = height;
+  const key = `${width}:${height}`;
+  const wrap = document.querySelector('.cam-wrap');
+  if (key !== camAspectKey) {
+    camAspectKey = key;
+    wrap.style.setProperty('--cam-aspect-ratio', `${width} / ${height}`);
+    wrap.style.setProperty('--cam-native-width', `${width}px`);
+    wrap.style.setProperty('--cam-native-height', `${height}px`);
+  }
+  scheduleCameraResize();
+}
+
+function syncCameraAspectFromImage() {
+  const img = document.getElementById('camImg');
+  if (img.naturalWidth && img.naturalHeight) {
+    applyCameraAspect(img.naturalWidth, img.naturalHeight);
+  }
+}
+
+async function refreshCameraStatus() {
+  try {
+    const st = await api('GET', '/api/camera/status');
+    applyCameraAspect(st.width, st.height);
+    const meta = [
+      `device: ${st.device || '/dev/video0'}`,
+      `${st.width}x${st.height}`,
+      `${st.fps}fps`,
+    ];
+    if (st.error) meta.push(`error: ${st.error}`);
+    document.getElementById('camMeta').textContent = meta.join('  |  ');
+  } catch (e) {}
+}
+
+function toggleCamera() {
+  const img = document.getElementById('camImg');
+  const ph  = document.getElementById('camPlaceholder');
+  const btn = document.getElementById('camToggle');
+  if (!camOn) {
+    // 캐시 무력화용 쿼리 — 같은 클라이언트의 재연결 시 stale 방지
+    refreshCameraStatus();
+    img.src = '/api/camera/stream?ts=' + Date.now();
+    img.style.display = 'block';
+    ph.style.display = 'none';
+    btn.classList.remove('off');
+    btn.textContent = '■ OFF';
+    camOn = true;
+    camFrameCount = 0;
+    img.addEventListener('load', _camOnFrame);
+    camFpsTimer = setInterval(_camTickFps, 1000);
+  } else {
+    img.removeEventListener('load', _camOnFrame);
+    img.src = '';
+    img.style.display = 'none';
+    ph.style.display = 'block';
+    btn.classList.add('off');
+    btn.textContent = '▶ ON';
+    camOn = false;
+    if (camFpsTimer) { clearInterval(camFpsTimer); camFpsTimer = null; }
+    document.getElementById('camFps').textContent = '—';
+  }
+}
+function _camOnFrame() {
+  camFrameCount++;
+  syncCameraAspectFromImage();
+}
+function _camTickFps() {
+  const fps = camFrameCount;
+  camFrameCount = 0;
+  document.getElementById('camFps').textContent = `${fps} fps`;
+}
+
+// ====== WebSocket 실시간 업데이트 ======
+let ws;
+let tasmgT0 = null;
+function connectWS() {
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  ws = new WebSocket(`${proto}//${location.host}/ws`);
+
+  ws.onmessage = (event) => {
+    const d = JSON.parse(event.data);
+    const nextStrategyName = d.strategy_name || '';
+    const nextParams = cloneData(d.strategy_params || {});
+    if (
+      d.running !== appState.running ||
+      nextStrategyName !== appState.activeStrategy ||
+      JSON.stringify(nextParams) !== JSON.stringify(appState.activeStrategyParams)
+    ) {
+      setAppState({
+        running: !!d.running,
+        activeStrategy: nextStrategyName,
+        activeStrategyParams: nextParams,
+      });
+    }
+
+    // 숫자 표시 (출력축 RPM 기준, 실측값 우선)
+    document.getElementById('valTime').textContent = d.elapsed.toFixed(1);
+    const outerShow = (d.outer_actual !== undefined && d.outer_actual !== 0) ? d.outer_actual : d.outer_rpm;
+    const innerShow = (d.inner_actual !== undefined && d.inner_actual !== 0) ? d.inner_actual : d.inner_rpm;
+    document.getElementById('valOuter').textContent = outerShow.toFixed(1);
+    document.getElementById('valInner').textContent = innerShow.toFixed(1);
+
+    // 센서
+    if (d.sensor && Object.keys(d.sensor).length > 0) {
+      document.getElementById('valRoll').textContent = (d.sensor.roll ?? 0).toFixed(2);
+      document.getElementById('valPitch').textContent = (d.sensor.pitch ?? 0).toFixed(2);
+      document.getElementById('valYaw').textContent = (d.sensor.yaw ?? 0).toFixed(2);
+      document.getElementById('valAx').textContent = (d.sensor.ax ?? 0).toFixed(4);
+      document.getElementById('valAy').textContent = (d.sensor.ay ?? 0).toFixed(4);
+      document.getElementById('valAz').textContent = (d.sensor.az ?? 0).toFixed(4);
+      document.getElementById('valWx').textContent = (d.sensor.wx ?? 0).toFixed(2);
+      document.getElementById('valWy').textContent = (d.sensor.wy ?? 0).toFixed(2);
+      document.getElementById('valWz').textContent = (d.sensor.wz ?? 0).toFixed(2);
+    }
+
+    // 차트 업데이트 (루프 실행 중일때만, RPM — 실측값 우선, 없으면 명령)
+    if (d.running) {
+      const outerPlot = (d.outer_actual !== undefined && d.outer_actual !== 0) ? d.outer_actual : d.outer_rpm;
+      const innerPlot = (d.inner_actual !== undefined && d.inner_actual !== 0) ? d.inner_actual : d.inner_rpm;
+      chartData.labels.push(d.elapsed.toFixed(1));
+      chartData.datasets[0].data.push(outerPlot ?? 0);
+      chartData.datasets[1].data.push(innerPlot ?? 0);
+
+      if (chartData.labels.length > MAX_POINTS) {
+        chartData.labels.shift();
+        chartData.datasets[0].data.shift();
+        chartData.datasets[1].data.shift();
+      }
+      chart.update('none');
+
+    }
+
+    // ===== 논문 메트릭 업데이트 =====
+    const mc = d.metrics_cmd  || {};
+    const mm = d.metrics_meas || {};
+    const setI5 = (id, v) => {
+      const el = document.getElementById(id);
+      el.classList.remove('good','warn','bad');
+      if (v === undefined || v === null) { el.textContent = '—'; return; }
+      el.textContent = v.toFixed(3);
+      el.classList.add(colorClassI5(v));
+    };
+    setI5('I5cmd',  mc.I5);
+    setI5('I5meas', mm.I5);
+    document.getElementById('NcmdI').textContent  = (mc.n ?? 0).toLocaleString();
+    document.getElementById('NmeasI').textContent = (mm.n ?? 0).toLocaleString();
+    document.getElementById('Dstdcmd').textContent  = mc.D_std  !== undefined ? mc.D_std.toFixed(3) : '—';
+    document.getElementById('Dstdmeas').textContent = mm.D_std  !== undefined ? mm.D_std.toFixed(3) : '—';
+    document.getElementById('chi2cmd').textContent  = mc.chi2   !== undefined ? mc.chi2.toFixed(0) : '—';
+    document.getElementById('chi2meas').textContent = mm.chi2   !== undefined ? mm.chi2.toFixed(0) : '—';
+
+    // 9-band 막대
+    if (mc.D && mc.D.length === 9) bandChartData.datasets[0].data = mc.D;
+    if (mm.D && mm.D.length === 9) bandChartData.datasets[1].data = mm.D;
+    bandChart.update('none');
+
+    // taSMG 시계열
+    if (d.running && d.elapsed !== undefined) {
+      if (tasmgT0 === null) tasmgT0 = d.elapsed;
+      const t = d.elapsed - tasmgT0;
+      tasmgData.labels.push(t.toFixed(1));
+      tasmgData.datasets[0].data.push(Math.max(mc.tasmg_G ?? 0, 1e-5));
+      tasmgData.datasets[1].data.push(mm.tasmg_G ? Math.max(mm.tasmg_G, 1e-5) : null);
+      tasmgData.datasets[2].data.push(1e-3);
+      while (tasmgData.labels.length > MAX_TASMG_PTS) {
+        tasmgData.labels.shift();
+        tasmgData.datasets.forEach(ds => ds.data.shift());
+      }
+      tasmgChart.update('none');
+    } else if (!d.running) {
+      tasmgT0 = null;  // reset on stop
+    }
+  };
+
+  ws.onclose = () => {
+    setTimeout(connectWS, 1000);
+  };
+}
+
+// ====== 초기화 ======
+window.addEventListener('load', async () => {
+  await refreshPorts();
+  await refreshCameraStatus();
+  const st = await api('GET', '/api/control/status');
+  setAppState({
+    running: !!st.running,
+    activeStrategy: st.strategy || '',
+    activeStrategyParams: cloneData(st.strategy_params || {}),
+    selectedStrategy: st.strategy || '',
+    strategyParams: cloneData(st.strategy_params || {}),
+    controlConfig: normaliseControlConfig(st.config),
+  });
+  await refreshStrategies();
+
+  if (st.ac_connected) {
+    document.getElementById('dotAC').classList.add('on');
+    document.getElementById('btnAcConn').disabled = true;
+    document.getElementById('btnAcDisc').disabled = false;
+  }
+  if (st.bldc_connected) {
+    document.getElementById('dotBLDC').classList.add('on');
+    document.getElementById('btnBldcConn').disabled = true;
+    document.getElementById('btnBldcDisc').disabled = false;
+  }
+  if (st.sensor_connected) {
+    document.getElementById('dotSensor').classList.add('on');
+    document.getElementById('btnSensConn').disabled = true;
+    document.getElementById('btnSensDisc').disabled = false;
+  }
+
+  connectWS();
+});
+window.addEventListener('resize', scheduleCameraResize);
+</script>
+</body>
+</html>

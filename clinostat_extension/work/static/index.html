@@ -1,0 +1,2734 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Clinostat Controller</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+<style>
+  :root {
+    --bg: #1a1a2e;
+    --surface: #16213e;
+    --card: #0f3460;
+    --accent: #e94560;
+    --green: #0cca4a;
+    --blue: #4cc9f0;
+    --orange: #f8961e;
+    --text: #eee;
+    --text-dim: #999;
+    --radius: 10px;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+  }
+  header {
+    background: var(--surface);
+    padding: 16px 32px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 2px solid var(--card);
+  }
+  header h1 { font-size: 1.4em; font-weight: 600; }
+  .status-bar {
+    display: flex;
+    gap: 20px;
+    font-size: 0.85em;
+  }
+  .status-dot {
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    display: inline-block;
+    margin-right: 5px;
+    background: #555;
+  }
+  .status-dot.on { background: var(--green); }
+
+  .main {
+    display: grid;
+    grid-template-columns: 340px 1fr;
+    gap: 16px;
+    padding: 16px;
+    max-width: 1600px;
+    margin: 0 auto;
+  }
+
+  /* --- 좌측 패널 --- */
+  .panel {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .card {
+    background: var(--surface);
+    border-radius: var(--radius);
+    padding: 16px;
+    border: 1px solid #2a2a4a;
+  }
+  .card h3 {
+    font-size: 0.9em;
+    color: var(--text-dim);
+    margin-bottom: 12px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+  /* Manual Operation 드롭다운(<details>) */
+  .manual-op-card { padding: 12px 16px; }
+  .manual-op-card > .manual-op-summary {
+    font-size: 0.9em;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    cursor: pointer;
+    list-style: none;       /* Firefox: 기본 삼각형 숨김 */
+    user-select: none;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .manual-op-card > .manual-op-summary::-webkit-details-marker { display: none; } /* Chrome */
+  .manual-op-card > .manual-op-summary .chev {
+    transition: transform 0.18s ease;
+    display: inline-block;
+    font-size: 0.9em;
+  }
+  .manual-op-card[open] > .manual-op-summary .chev { transform: rotate(180deg); }
+  .manual-op-card[open] > .manual-op-summary { margin-bottom: 10px; }
+  .form-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+  .form-row label {
+    width: 90px;
+    font-size: 0.85em;
+    color: var(--text-dim);
+  }
+  select, input[type="number"], input[type="text"] {
+    background: var(--bg);
+    color: var(--text);
+    border: 1px solid #333;
+    border-radius: 6px;
+    padding: 6px 10px;
+    font-size: 0.9em;
+    flex: 1;
+    min-width: 0;
+  }
+  select:focus, input:focus { outline: none; border-color: var(--blue); }
+
+  .btn-row { display: flex; gap: 8px; margin-top: 8px; }
+  button {
+    border: none;
+    border-radius: 6px;
+    padding: 8px 16px;
+    cursor: pointer;
+    font-size: 0.85em;
+    font-weight: 600;
+    transition: opacity 0.2s;
+  }
+  button:hover { opacity: 0.85; }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+  .btn-connect { background: var(--blue); color: #000; }
+  .btn-disconnect { background: #555; color: #fff; }
+  .btn-test { background: var(--orange); color: #000; }
+  .btn-refresh { background: #333; color: #ccc; font-size: 0.8em; padding: 6px 10px; }
+
+  .btn-start {
+    background: var(--green);
+    color: #000;
+    font-size: 1.1em;
+    padding: 14px;
+    width: 100%;
+  }
+  .btn-stop {
+    background: var(--accent);
+    color: #fff;
+    font-size: 1.1em;
+    padding: 14px;
+    width: 100%;
+  }
+
+  /* --- 우측: 모니터 --- */
+  .monitor {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .monitor-top {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 12px;
+  }
+  .metric-card {
+    background: var(--surface);
+    border-radius: var(--radius);
+    padding: 16px;
+    text-align: center;
+    border: 1px solid #2a2a4a;
+  }
+  .metric-card .label { font-size: 0.8em; color: var(--text-dim); margin-bottom: 4px; }
+  .metric-card .value {
+    font-size: 1.8em;
+    font-weight: 700;
+    font-family: 'Consolas', monospace;
+  }
+  .metric-card .unit { font-size: 0.7em; color: var(--text-dim); }
+  .outer-color { color: var(--blue); }
+  .inner-color { color: var(--green); }
+  .time-color { color: var(--orange); }
+
+  .chart-card {
+    background: var(--surface);
+    border-radius: var(--radius);
+    padding: 16px;
+    border: 1px solid #2a2a4a;
+    flex: none;            /* 부모 flex 컬럼에서 늘어나지 않도록 고정 */
+    height: 360px;         /* RPM 그래프(~280px) + 하단 메트릭 footer(~60px) */
+    display: flex;
+    flex-direction: column;
+  }
+  .chart-card canvas {
+    width: 100% !important;
+    flex: 1;               /* footer 를 제외한 공간 전부를 canvas 가 차지 */
+    min-height: 0;         /* flex item 이 줄어들 수 있도록 */
+  }
+  .chart-footer {
+    flex: none;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid #2a2a4a;
+  }
+  .chart-footer .cf-metric {
+    display: flex;
+    align-items: baseline;
+    justify-content: center;
+    gap: 8px;
+  }
+  .chart-footer .cf-metric .lbl {
+    font-size: 0.8em;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+  }
+  .chart-footer .cf-metric .val {
+    font-size: 1.7em;
+    font-weight: 700;
+    font-family: 'Consolas', monospace;
+    line-height: 1;
+  }
+  .chart-footer .cf-metric .unit {
+    font-size: 0.78em;
+    color: var(--text-dim);
+  }
+
+  .sensor-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+  }
+  .sensor-card {
+    background: var(--surface);
+    border-radius: var(--radius);
+    padding: 14px;
+    text-align: center;
+    border: 1px solid #2a2a4a;
+  }
+  .sensor-card .label { font-size: 0.75em; color: var(--text-dim); }
+  .sensor-card .value {
+    font-size: 1.3em;
+    font-weight: 600;
+    font-family: 'Consolas', monospace;
+    color: var(--accent);
+  }
+
+  .func-desc {
+    font-size: 0.75em;
+    color: var(--text-dim);
+    font-family: 'Consolas', monospace;
+    margin-top: 4px;
+    padding: 6px 8px;
+    background: var(--bg);
+    border-radius: 4px;
+  }
+
+  /* --- 논문 메트릭 카드 --- */
+  .metrics-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+  .metric-paper {
+    background: var(--surface);
+    border-radius: var(--radius);
+    padding: 14px;
+    border: 1px solid #2a2a4a;
+    min-height: 280px;
+    display: flex;
+    flex-direction: column;
+  }
+  .metric-paper h4 {
+    font-size: 0.85em;
+    color: var(--text-dim);
+    margin-bottom: 8px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+  }
+  .metric-paper h4 .target {
+    font-size: 0.7em;
+    color: var(--orange);
+    text-transform: none;
+    letter-spacing: 0;
+  }
+  .metric-paper .body { flex: 1; position: relative; min-height: 0; }
+
+  .I5-gauge {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-top: 8px;
+  }
+  .I5-gauge .col {
+    background: var(--bg);
+    border-radius: 6px;
+    padding: 12px;
+    text-align: center;
+  }
+  .I5-gauge .col .lbl { font-size: 0.7em; color: var(--text-dim); }
+  .I5-gauge .col .val {
+    font-size: 1.8em;
+    font-weight: 700;
+    font-family: 'Consolas', monospace;
+    margin: 6px 0;
+  }
+  .I5-gauge .val.good { color: var(--green); }
+  .I5-gauge .val.warn { color: var(--orange); }
+  .I5-gauge .val.bad  { color: var(--accent); }
+
+  .summary-row {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 6px;
+    margin-top: 8px;
+    font-size: 0.72em;
+    text-align: center;
+  }
+  .summary-row .pair {
+    background: var(--bg);
+    border-radius: 4px;
+    padding: 6px 4px;
+  }
+  .summary-row .pair .k { color: var(--text-dim); }
+  .summary-row .pair .v { font-family: 'Consolas', monospace; }
+
+  #sphereDiv { width: 100%; height: 100%; min-height: 240px; }
+
+  /* --- 카메라 카드 --- */
+  .cam-card {
+    background: var(--surface);
+    border-radius: var(--radius);
+    padding: 12px;
+    border: 1px solid #2a2a4a;
+  }
+  .cam-card h3 {
+    font-size: 0.9em;
+    color: var(--text-dim);
+    margin-bottom: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .cam-wrap {
+    --cam-aspect-ratio: 4 / 3;
+    --cam-native-width: 640px;
+    --cam-native-height: 480px;
+    position: relative;
+    width: 100%;
+    height: auto;
+    max-width: 100%;
+    margin: 0 auto;
+    background: #000;
+    border-radius: 6px;
+    aspect-ratio: var(--cam-aspect-ratio);
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: aspect-ratio 0.2s ease;
+  }
+  .cam-wrap img { width: 100%; height: 100%; object-fit: contain; display: none; }
+  .cam-wrap .placeholder {
+    color: var(--text-dim);
+    font-size: 0.9em;
+    text-align: center;
+  }
+  .cam-meta {
+    margin-top: 6px;
+    font-size: 0.72em;
+    color: var(--text-dim);
+    display: flex;
+    justify-content: space-between;
+  }
+  .cam-toggle {
+    background: var(--green);
+    color: #000;
+    border: none;
+    border-radius: 5px;
+    padding: 5px 12px;
+    font-size: 0.8em;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .cam-toggle.off { background: var(--accent); color: #fff; }
+
+  /* --- 카메라(좌) + 그래프(우) 2-컬럼 행 --- */
+  .cam-chart-row {
+    display: grid;
+    grid-template-columns: 1fr 2fr;   /* 카메라 1/3, 그래프 2/3 (직전 50:50 → 카메라 폭 2/3 축소) */
+    gap: 12px;
+  }
+  .cam-chart-row .cam-card {
+    height: 360px;             /* chart-card 와 동일 높이로 좌우 정렬 */
+    display: flex;
+    flex-direction: column;
+  }
+  .cam-chart-row .cam-card .cam-wrap {
+    flex: 1;                   /* 헤더와 fps 메타를 제외한 공간을 카메라 영상이 차지 */
+    min-height: 0;
+    width: 100%;
+    height: auto;
+    aspect-ratio: auto;        /* flex 가 결정한 크기를 그대로 사용 (편지지처럼 letterbox 됨) */
+  }
+  @media (max-width: 900px) {
+    /* 화면이 좁으면 위아래 1-컬럼으로 떨어짐 */
+    .cam-chart-row { grid-template-columns: 1fr; }
+    .cam-chart-row .cam-card { height: auto; }
+    .cam-chart-row .cam-card .cam-wrap { aspect-ratio: 4 / 3; }
+  }
+
+  /* --- 라이브 스트립: 카메라(작게) + 경과시간 + 외/내측 모터속도 한 줄 --- */
+  .live-strip {
+    background: var(--surface);
+    border-radius: var(--radius);
+    border: 1px solid #2a2a4a;
+    padding: 1px 10px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .live-strip .cam-wrap.cam-mini {
+    --cam-aspect-ratio: 4 / 3;
+    height: 150px;        /* 직전 15px → 10배. 카메라 화면이 실제로 보이도록. */
+    width: auto;          /* 높이 + aspect-ratio 만으로 폭 결정 */
+    min-width: 200px;
+    aspect-ratio: var(--cam-aspect-ratio);
+    margin: 0;
+    flex-shrink: 0;
+  }
+  .live-strip .cam-mini .placeholder { font-size: 0.85em; line-height: 1; }
+  .live-strip .cam-toggle {
+    flex-shrink: 0;
+    padding: 4px 12px;
+    font-size: 0.95em;
+    line-height: 1;
+  }
+  .live-strip .live-metric {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    padding: 0 6px;
+  }
+  .live-strip .live-metric .lbl {
+    font-size: 0.95em;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .live-strip .live-metric .val {
+    font-size: 2.2em;        /* 카메라 150px 높이에 맞춰 적당히 — 약 35px */
+    font-weight: 700;
+    font-family: 'Consolas', monospace;
+    line-height: 1;
+  }
+  .live-strip .live-metric .unit {
+    font-size: 0.85em;
+    color: var(--text-dim);
+  }
+  .cam-strip-meta { font-size: 0.85em !important; }
+  .cam-strip-meta {
+    margin-left: auto;
+    font-size: 0.72em;
+    color: var(--text-dim);
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Clinostat Controller</h1>
+  <div class="status-bar">
+    <span><span class="status-dot" id="dotAC"></span>AC Servo</span>
+    <span><span class="status-dot" id="dotBLDC"></span>BLDC</span>
+    <span><span class="status-dot" id="dotSensor"></span>Sensor</span>
+    <span><span class="status-dot" id="dotLoop"></span>Control Loop</span>
+    <a href="/static/mobile.html" style="color: var(--blue); text-decoration: none; font-size: 0.85em;">📱 Mobile</a>
+    <a href="#spacebioPanel" id="spacebioJumpLink" style="color: var(--blue); text-decoration: none; font-size: 0.85em;">▼ SpaceBio 통합 패널로 이동</a>
+  </div>
+</header>
+
+<div class="main">
+  <!-- ====== 좌측 패널 ====== -->
+  <div class="panel">
+
+    <!-- 포트 연결 -->
+    <div class="card">
+      <h3>Connection</h3>
+
+      <button class="btn-refresh" onclick="autoDetect()" style="width:100%; margin-bottom:12px; padding:8px;">🔄 자동 감지 (Auto-detect)</button>
+
+      <!-- AC Servo -->
+      <div style="margin-bottom:14px">
+        <div style="font-size:0.85em; font-weight:600; margin-bottom:6px; color:var(--blue);">AC Servo (Outer)</div>
+        <div class="form-row">
+          <label>Port</label>
+          <select id="acPort"></select>
+        </div>
+        <div class="form-row">
+          <label>Baudrate</label>
+          <select id="acBaud">
+            <option value="2400">2400</option>
+            <option value="4800">4800</option>
+            <option value="9600">9600</option>
+            <option value="19200">19200</option>
+            <option value="38400" selected>38400</option>
+            <option value="57600">57600</option>
+            <option value="115200">115200</option>
+          </select>
+        </div>
+        <div class="btn-row">
+          <button class="btn-connect" id="btnAcConn" onclick="connectAC()">Connect</button>
+          <button class="btn-disconnect" id="btnAcDisc" onclick="disconnectAC()" disabled>Disconnect</button>
+          <button class="btn-test" onclick="commTestAC()">Test</button>
+        </div>
+      </div>
+
+      <!-- BLDC -->
+      <div style="margin-bottom:14px">
+        <div style="font-size:0.85em; font-weight:600; margin-bottom:6px; color:var(--green);">BLDC (Inner)</div>
+        <div class="form-row">
+          <label>Port</label>
+          <select id="bldcPort"></select>
+        </div>
+        <div class="form-row">
+          <label>Baudrate</label>
+          <select id="bldcBaud">
+            <option value="9600">9600</option>
+            <option value="19200">19200</option>
+            <option value="38400">38400</option>
+            <option value="57600">57600</option>
+            <option value="115200">115200</option>
+            <option value="230400" selected>230400</option>
+            <option value="460800">460800</option>
+            <option value="921600">921600</option>
+          </select>
+        </div>
+        <div class="btn-row">
+          <button class="btn-connect" id="btnBldcConn" onclick="connectBLDC()">Connect</button>
+          <button class="btn-disconnect" id="btnBldcDisc" onclick="disconnectBLDC()" disabled>Disconnect</button>
+          <button class="btn-test" onclick="commTestBLDC()">Test</button>
+        </div>
+      </div>
+
+      <!-- Sensor -->
+      <div>
+        <div style="font-size:0.85em; font-weight:600; margin-bottom:6px; color:var(--accent);">Sensor (IMU)</div>
+        <div class="form-row">
+          <label>Port</label>
+          <select id="sensorPort"></select>
+        </div>
+        <div class="form-row">
+          <label>Baudrate</label>
+          <select id="sensorBaud">
+            <option value="9600">9600</option>
+            <option value="115200" selected>115200</option>
+            <option value="230400">230400</option>
+          </select>
+        </div>
+        <div class="btn-row">
+          <button class="btn-connect" id="btnSensConn" onclick="connectSensor()">Connect</button>
+          <button class="btn-disconnect" id="btnSensDisc" onclick="disconnectSensor()" disabled>Disconnect</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Operation Condition</h3>
+      <div id="operationConditionRoot"></div>
+    </div>
+
+    <details class="card manual-op-card">
+      <summary class="manual-op-summary">Manual Operation <span class="chev">▾</span></summary>
+      <div id="manualControlRoot"></div>
+      <div class="func-desc" style="margin-top:8px">
+        Outer axis 와 Inner axis 는 독립적으로 start/stop 합니다. 수동 운전 시 선택된 operation condition 은 비활성화됩니다.
+      </div>
+    </details>
+
+    <button class="btn-stop" id="btnStopAll" onclick="stopAllMotion()">STOP ALL</button>
+
+  </div>
+
+  <!-- ====== 우측 모니터 ====== -->
+  <div class="monitor">
+
+    <!-- 카메라(좌) + RPM 그래프(우) 를 2-컬럼 grid 로 나란히 -->
+    <div class="cam-chart-row">
+      <div class="cam-card">
+        <h3>
+          <span>🎥 Camera (Live)</span>
+          <button class="cam-toggle off" id="camToggle" onclick="toggleCamera()">▶ ON</button>
+        </h3>
+        <div class="cam-wrap">
+          <img id="camImg" alt="">
+          <div class="placeholder" id="camPlaceholder">카메라 OFF — "▶ ON" 으로 시작</div>
+        </div>
+        <div class="cam-meta">
+          <span id="camMeta" hidden></span>
+          <span id="camFps">—</span>
+        </div>
+      </div>
+
+      <div class="chart-card">
+        <canvas id="speedChart"></canvas>
+        <!-- 실시간 메트릭: 시간 / 외측(AC) / 내측(BLDC) — 1행 3컬럼 -->
+        <div class="chart-footer">
+          <div class="cf-metric">
+            <span class="lbl">Time</span>
+            <span class="val time-color" id="valTime">0.0</span>
+            <span class="unit">s</span>
+          </div>
+          <div class="cf-metric">
+            <span class="lbl">Outer</span>
+            <span class="val outer-color" id="valOuter">0</span>
+            <span class="unit">rpm</span>
+          </div>
+          <div class="cf-metric">
+            <span class="lbl">Inner</span>
+            <span class="val inner-color" id="valInner">0</span>
+            <span class="unit">rpm</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="sensor-grid">
+      <div class="sensor-card">
+        <div class="label">Roll</div>
+        <div class="value" id="valRoll">0.00</div>
+      </div>
+      <div class="sensor-card">
+        <div class="label">Pitch</div>
+        <div class="value" id="valPitch">0.00</div>
+      </div>
+      <div class="sensor-card">
+        <div class="label">Yaw</div>
+        <div class="value" id="valYaw">0.00</div>
+      </div>
+      <div class="sensor-card">
+        <div class="label">Accel X (g)</div>
+        <div class="value" id="valAx">0.00</div>
+      </div>
+      <div class="sensor-card">
+        <div class="label">Accel Y (g)</div>
+        <div class="value" id="valAy">0.00</div>
+      </div>
+      <div class="sensor-card">
+        <div class="label">Accel Z (g)</div>
+        <div class="value" id="valAz">0.00</div>
+      </div>
+      <div class="sensor-card">
+        <div class="label">Gyro X (deg/s)</div>
+        <div class="value" id="valWx">0.00</div>
+      </div>
+      <div class="sensor-card">
+        <div class="label">Gyro Y (deg/s)</div>
+        <div class="value" id="valWy">0.00</div>
+      </div>
+      <div class="sensor-card">
+        <div class="label">Gyro Z (deg/s)</div>
+        <div class="value" id="valWz">0.00</div>
+      </div>
+    </div>
+
+    <!-- ====== 논문 메트릭 (실시간) ====== -->
+    <div class="metrics-grid">
+      <!-- I(5°) 게이지 -->
+      <div class="metric-paper">
+        <h4>I(5°) — 극관 집중도 <span class="target">target ≈ 1.0</span></h4>
+        <div class="body">
+          <div class="I5-gauge">
+            <div class="col">
+              <div class="lbl">cmd (모터 각도)</div>
+              <div class="val" id="I5cmd">—</div>
+              <div class="lbl">samples: <span id="NcmdI">0</span></div>
+            </div>
+            <div class="col">
+              <div class="lbl">meas (IMU)</div>
+              <div class="val" id="I5meas">—</div>
+              <div class="lbl">samples: <span id="NmeasI">0</span></div>
+            </div>
+          </div>
+          <div class="summary-row">
+            <div class="pair"><div class="k">D_std cmd</div><div class="v" id="Dstdcmd">—</div></div>
+            <div class="pair"><div class="k">D_std meas</div><div class="v" id="Dstdmeas">—</div></div>
+            <div class="pair"><div class="k">χ² cmd</div><div class="v" id="chi2cmd">—</div></div>
+            <div class="pair"><div class="k">χ² meas</div><div class="v" id="chi2meas">—</div></div>
+          </div>
+          <div style="margin-top:10px; font-size:0.72em; color: var(--text-dim);">
+            논문 권장값 — Fibonacci: I≈1.17, D_std≈0.087.
+            Adaptive blend: I≈0.99, D_std≈0.385.
+          </div>
+        </div>
+      </div>
+
+      <!-- 9-band D 막대그래프 -->
+      <div class="metric-paper">
+        <h4>D[θ₁,θ₂] — 9개 위도밴드 밀도 <span class="target">target D = 1</span></h4>
+        <div class="body"><canvas id="bandChart"></canvas></div>
+      </div>
+
+      <!-- taSMG 시계열 -->
+      <div class="metric-paper">
+        <h4>taSMG — ‖ḡ(t)‖ <span class="target">target &lt; 10⁻³ G</span></h4>
+        <div class="body"><canvas id="tasmgChart"></canvas></div>
+      </div>
+
+      <!-- 단위구 산점도 (Plotly) -->
+      <div class="metric-paper">
+        <h4>중력벡터 분포 (단위구) <span class="target">
+          <select id="sphereSrc" style="background:transparent; color:var(--orange); border:1px solid #444; padding:1px 4px; font-size:0.95em;">
+            <option value="cmd">cmd</option>
+            <option value="meas">meas</option>
+          </select>
+        </span></h4>
+        <div class="body"><div id="sphereDiv"></div></div>
+      </div>
+    </div>
+
+    <div style="display:flex; gap:8px; margin-top:8px;">
+      <button class="btn-connect" onclick="saveRun()">💾 결과 JSON 저장 (runs/)</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ====== API 호출 유틸 ======
+const API = '';
+async function api(method, path, body) {
+  const opts = { method, headers: { 'Content-Type': 'application/json' } };
+  if (body) opts.body = JSON.stringify(body);
+  const r = await fetch(API + path, opts);
+  return r.json();
+}
+
+// ====== 포트 목록 ======
+async function refreshPorts() {
+  const { ports } = await api('GET', '/api/ports');
+  const detected = await api('GET', '/api/ports/detect');
+  const autoMap = { acPort: detected.ac_servo, bldcPort: detected.bldc, sensorPort: detected.sensor };
+  ['acPort', 'bldcPort', 'sensorPort'].forEach(id => {
+    const sel = document.getElementById(id);
+    const prev = sel.value;
+    sel.innerHTML = '';
+    ports.forEach(p => {
+      const opt = document.createElement('option');
+      opt.value = p;
+      opt.textContent = (p === autoMap[id]) ? `${p} ✓ 자동감지` : p;
+      sel.appendChild(opt);
+    });
+    // 자동 감지된 포트 우선, 없으면 이전값 유지
+    if (autoMap[id] && ports.includes(autoMap[id])) sel.value = autoMap[id];
+    else if (ports.includes(prev)) sel.value = prev;
+  });
+}
+
+async function autoDetect() {
+  const detected = await api('GET', '/api/ports/detect');
+  await refreshPorts();
+  const msg = [
+    `AC Servo: ${detected.ac_servo || '없음'}`,
+    `BLDC: ${detected.bldc || '없음'}`,
+    `Sensor: ${detected.sensor || '없음'}`,
+  ].join('\n');
+  alert('자동 감지 결과:\n\n' + msg);
+}
+
+// ====== 연결 / 해제 ======
+async function connectAC() {
+  const r = await api('POST', '/api/ac/connect', {
+    port: document.getElementById('acPort').value,
+    baudrate: parseInt(document.getElementById('acBaud').value)
+  });
+  if (r.ok) {
+    document.getElementById('dotAC').classList.add('on');
+    document.getElementById('btnAcConn').disabled = true;
+    document.getElementById('btnAcDisc').disabled = false;
+  } else alert('AC 연결 실패: ' + r.error);
+}
+
+async function disconnectAC() {
+  await api('POST', '/api/ac/disconnect');
+  document.getElementById('dotAC').classList.remove('on');
+  document.getElementById('btnAcConn').disabled = false;
+  document.getElementById('btnAcDisc').disabled = true;
+}
+
+async function connectBLDC() {
+  const r = await api('POST', '/api/bldc/connect', {
+    port: document.getElementById('bldcPort').value,
+    baudrate: parseInt(document.getElementById('bldcBaud').value)
+  });
+  if (r.ok) {
+    document.getElementById('dotBLDC').classList.add('on');
+    document.getElementById('btnBldcConn').disabled = true;
+    document.getElementById('btnBldcDisc').disabled = false;
+  } else alert('BLDC 연결 실패: ' + r.error);
+}
+
+async function disconnectBLDC() {
+  await api('POST', '/api/bldc/disconnect');
+  document.getElementById('dotBLDC').classList.remove('on');
+  document.getElementById('btnBldcConn').disabled = false;
+  document.getElementById('btnBldcDisc').disabled = true;
+}
+
+async function connectSensor() {
+  const r = await api('POST', '/api/sensor/connect', {
+    port: document.getElementById('sensorPort').value,
+    baudrate: parseInt(document.getElementById('sensorBaud').value)
+  });
+  if (r.ok) {
+    document.getElementById('dotSensor').classList.add('on');
+    document.getElementById('btnSensConn').disabled = true;
+    document.getElementById('btnSensDisc').disabled = false;
+  } else alert('센서 연결 실패: ' + r.error);
+}
+
+async function disconnectSensor() {
+  await api('POST', '/api/sensor/disconnect');
+  document.getElementById('dotSensor').classList.remove('on');
+  document.getElementById('btnSensConn').disabled = false;
+  document.getElementById('btnSensDisc').disabled = true;
+}
+
+async function commTestAC() {
+  const r = await api('POST', '/api/ac/comm-test');
+  alert(r.ok ? 'AC 응답: ' + r.response + ' (' + r.length + ' bytes)' : 'AC 통신 실패');
+}
+
+async function diagnoseAC() {
+  alert('심층 진단을 실행합니다.\nbaudrate × slave ID 조합을 테스트합니다.\n잠시 기다려주세요...');
+  const r = await api('POST', '/api/ac/diagnose');
+  let msg = `Port: ${r.port}\n`;
+  msg += `Passive data (장치가 보낸 데이터): ${r.passive_data || 'none'}\n\n`;
+
+  if (r.found) {
+    msg += `=== 통신 성공! ===\n`;
+    msg += `Baudrate: ${r.match.baudrate}\n`;
+    msg += `Slave ID: ${r.match.slave_id}\n`;
+    msg += `Response: ${r.match.response}\n`;
+  } else {
+    msg += `${r.tested}개 조합 테스트 완료\n`;
+    msg += r.message + '\n\n';
+    msg += '확인사항:\n';
+    msg += '1. 장치 전원이 켜져 있는지\n';
+    msg += '2. USB 케이블이 데이터 케이블인지 (충전 전용 아닌지)\n';
+    msg += '3. 이 포트가 맞는 장치인지\n';
+  }
+  alert(msg);
+}
+
+async function commTestBLDC() {
+  const r = await api('POST', '/api/bldc/comm-test');
+  alert(r.ok ? 'BLDC 응답: ' + r.response : 'BLDC 통신 실패');
+}
+
+const RAD_S_TO_RPM = 60.0 / (2 * Math.PI);
+const DEFAULT_CONTROL_CONFIG = {
+  outer: { enabled: false, func_type: 'constant', base_speed: 5, amplitude: 0, period: 10 },
+  inner: { enabled: false, func_type: 'constant', base_speed: 20, amplitude: 0, period: 10 },
+};
+// maxRpm: Manual Operation 입력 상한 (양/음 대칭, ±maxRpm). 서버 direct_control_speed_guard 한도와 일치.
+const AXIS_META = {
+  outer: { title: 'Outer Axis (AC Servo)', color: 'var(--blue)', maxRpm: 10, step: 0.1, ampStep: 0.1 },
+  inner: { title: 'Inner Axis (BLDC)', color: 'var(--green)', maxRpm: 30, step: 0.5, ampStep: 0.5 },
+};
+const PARAM_LABELS = {
+  inner_rad_s: 'inner_rad_s',
+  outer_rad_s: 'outer_rad_s',
+  w_min: 'w_min',
+  w_max: 'w_max',
+  w2_base: 'w2_base',
+  w2_min: 'w2_min',
+  t_switch_s: 't_switch_s',
+  alpha: 'alpha',
+  N_points: 'N_points',
+  T_dwell_s: 'T_dwell_s',
+};
+const appState = {
+  running: false,
+  selectedStrategy: '',
+  activeStrategy: '',
+  activeStrategyParams: {},
+  strategyParams: {},
+  strategies: [],
+  strategyMap: {},
+  controlConfig: cloneData(DEFAULT_CONTROL_CONFIG),
+  supervisionAck: false,
+};
+
+function toggleSupervisionAck(checked) {
+  setAppState({ supervisionAck: Boolean(checked) });
+}
+
+function cloneData(data) {
+  return JSON.parse(JSON.stringify(data));
+}
+
+function setAppState(patch) {
+  Object.assign(appState, patch);
+  renderReactiveSections();
+}
+
+function currentStrategyMeta() {
+  return appState.strategyMap[appState.selectedStrategy] || null;
+}
+
+function strategyMetaByName(name) {
+  return appState.strategyMap[name] || null;
+}
+
+function formatParamLabel(key) {
+  return PARAM_LABELS[key] || key;
+}
+
+function formatParamValue(value) {
+  const num = Number(value);
+  return Number.isFinite(num) ? String(num) : String(value);
+}
+
+function formatMathNumber(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return String(value ?? '?');
+  return num.toFixed(3).replace(/\.?0+$/, '');
+}
+
+function buildRenderedFormulaLines(strategy, params, evaluate = false) {
+  if (!strategy) return [];
+  if (!evaluate) return strategy.formula || [];
+
+  const p = params || {};
+  const val = (key, fallback = '?') => key in p ? formatMathNumber(p[key]) : fallback;
+  switch (strategy.name) {
+    case 'constant':
+      return [
+        `ω₂ = ${val('outer_rad_s')} rad/s`,
+        `ω₁ = ${val('inner_rad_s')} rad/s`,
+      ];
+    case 'reciprocal_sinusoidal':
+      return [
+        `ω₂ = ${val('w2_base')} rad/s`,
+        `ω₁(θ) = min(${val('w_min')} / |cos θ|, ${val('w_max')}) rad/s`,
+      ];
+    case 'halton':
+      return [
+        `ω₂ = ${val('w2_base')} rad/s`,
+        `ω₁(θ) = sgn(Δθ) · clip(|Δθ| / 0.02, ${val('w_min')}, ${val('w_max')}) rad/s`,
+      ];
+    case 'adaptive_blend':
+      return [
+        `ω₂ = ${val('w2_base')} rad/s`,
+        `ω₁(θ,t) = { Halton, frac(t / ${val('t_switch_s')}) < ${val('alpha')} ; min(${val('w_min')} / |cos θ|, ${val('w_max')}), otherwise }`,
+      ];
+    case 'fibonacci_lattice_dwell':
+      return [
+        `ω₂ = ${val('w2_base')} rad/s`,
+        `ω₁(θ) = sgn(Δθ) · clip(|Δθ| / 0.02, ${val('w_min')}, ${val('w_max')}) rad/s`,
+        `dwell: N = ${val('N_points')} points, T_dwell = ${val('T_dwell_s')} s`,
+      ];
+    case 'motor2_comodulation':
+      return [
+        `ω₂(θ) = max(${val('w2_base')} · |cos θ|, ${val('w2_min')}) rad/s`,
+        `ω₁(θ) = min(${val('w_min')} / |cos θ|, ${val('w_max')}) rad/s`,
+      ];
+    default:
+      return strategy.formula || [];
+  }
+}
+
+function renderStrategyFormulaBlock(title, strategy, params, accent = 'var(--blue)', evaluate = false) {
+  if (!strategy) return '';
+  const paramEntries = Object.entries(params || {});
+  const paramText = paramEntries.length > 0
+    ? paramEntries.map(([key, value]) => `${formatParamLabel(key)}=${formatParamValue(value)}`).join(', ')
+    : 'preset';
+  const lines = buildRenderedFormulaLines(strategy, params, evaluate);
+  return `
+    <div class="func-desc" style="margin-top:8px; border-left:3px solid ${accent}">
+      <div style="font-weight:600; margin-bottom:4px;">${title}</div>
+      ${lines.map((line) => `<div>${line}</div>`).join('')}
+      <div style="margin-top:6px; color:var(--text-dim)">params: ${paramText}</div>
+    </div>
+  `;
+}
+
+function formatAxisExpression(axisKey, cfg) {
+  const omega = axisKey === 'outer' ? 'ω₂' : 'ω₁';
+  const base = Number(cfg.base_speed || 0);
+  const amp = Number(cfg.amplitude || 0);
+  const period = Number(cfg.period || 0);
+  switch (cfg.func_type) {
+    case 'sine':
+      return `${omega}(t) = ${base.toFixed(2)} + ${amp.toFixed(2)}·sin(2πt/${period.toFixed(2)}) rpm`;
+    case 'triangle':
+      return `${omega}(t) = ${base.toFixed(2)} + ${amp.toFixed(2)}·triangle(t/${period.toFixed(2)}) rpm`;
+    case 'square':
+      return `${omega}(t) = ${base.toFixed(2)} + ${amp.toFixed(2)}·square(t/${period.toFixed(2)}) rpm`;
+    case 'sawtooth':
+      return `${omega}(t) = ${base.toFixed(2)} + ${amp.toFixed(2)}·sawtooth(t/${period.toFixed(2)}) rpm`;
+    default:
+      return `${omega}(t) = ${base.toFixed(2)} rpm`;
+  }
+}
+
+function renderOperationCondition() {
+  const strategy = currentStrategyMeta();
+  const activeMeta = strategyMetaByName(appState.activeStrategy);
+  const options = [
+    '<option value="">— Select Condition —</option>',
+    ...appState.strategies.map((s) => {
+      const star = s.name === 'fibonacci_lattice_dwell' ? '★ ' : '';
+      const selected = s.name === appState.selectedStrategy ? 'selected' : '';
+      return `<option value="${s.name}" ${selected}>${star}${s.name}</option>`;
+    }),
+  ].join('');
+
+  const desc = strategy
+    ? strategy.description
+    : '조건을 선택하면 해당 전략식과 편집 가능한 변수가 아래에 표시됩니다.';
+  const selected = appState.selectedStrategy
+    ? `<div class="func-desc" style="margin-top:8px; border-left:3px solid var(--blue)">Selected: ${appState.selectedStrategy}</div>`
+    : '';
+  const active = appState.activeStrategy
+    ? `<div class="func-desc" style="margin-top:8px; border-left:3px solid var(--green)">Active: ${appState.activeStrategy}</div>`
+    : '';
+  const appliedFormula = activeMeta
+    ? renderStrategyFormulaBlock(`Applied Formula: ${appState.activeStrategy}`, activeMeta, appState.activeStrategyParams, 'var(--green)', true)
+    : '';
+  const formula = strategy
+    ? renderStrategyFormulaBlock('Editable Formula', strategy, appState.strategyParams, 'var(--blue)', true)
+    : '';
+  const params = strategy
+    ? Object.entries(appState.strategyParams).map(([key, value]) => `
+        <div class="form-row">
+          <label>${formatParamLabel(key)}</label>
+          <input
+            type="number"
+            value="${value}"
+            step="any"
+            onchange="updateStrategyParam('${key}', this.value)"
+          >
+        </div>
+      `).join('')
+    : '<div class="func-desc" style="margin-top:8px">수동 운전 중에는 condition이 비활성화되며, 값은 유지됩니다.</div>';
+
+  const ackChecked = appState.supervisionAck ? 'checked' : '';
+  return `
+    <div class="form-row">
+      <label>Condition</label>
+      <select onchange="selectOperationCondition(this.value)">${options}</select>
+    </div>
+    <div class="func-desc" style="min-height:30px">${desc}</div>
+    ${selected}
+    ${formula}
+    ${active}
+    ${appliedFormula}
+    <div style="margin-top:8px">${params}</div>
+    <label style="display:flex; align-items:flex-start; gap:8px; margin-top:10px; padding:8px; border:1px solid #2a2a4a; border-radius:6px; font-size:0.85em; cursor:pointer;">
+      <input type="checkbox" ${ackChecked} onchange="toggleSupervisionAck(this.checked)" style="margin-top:3px;">
+      <span>안전 확인: 감독자가 입회 중이며 IMU는 sample_platform에 장착되어 있습니다.</span>
+    </label>
+    <div class="btn-row">
+      <button class="btn-connect" onclick="applyOperationCondition(false)">Apply</button>
+      <button class="btn-test" onclick="applyOperationCondition(true)">Run</button>
+      <button class="btn-disconnect" onclick="clearOperationCondition()">Clear</button>
+    </div>
+  `;
+}
+
+function renderManualAxis(axisKey) {
+  const cfg = appState.controlConfig[axisKey];
+  const meta = AXIS_META[axisKey];
+  const isEnabled = cfg.enabled;
+  const funcOptions = ['constant', 'sine', 'triangle', 'square', 'sawtooth']
+    .map((name) => `<option value="${name}" ${cfg.func_type === name ? 'selected' : ''}>${name}</option>`)
+    .join('');
+  const status = isEnabled ? 'running' : 'stopped';
+  return `
+    <div style="border:1px solid #2a2a4a; border-radius:8px; padding:12px; margin-top:10px;">
+      <div style="font-size:0.85em; font-weight:600; margin-bottom:8px; color:${meta.color};">${meta.title}</div>
+      <div class="func-desc" style="margin-bottom:8px">Status: ${status}</div>
+      <div class="form-row">
+        <label>Function</label>
+        <select onchange="updateManualAxisField('${axisKey}', 'func_type', this.value)">${funcOptions}</select>
+      </div>
+      <div class="form-row">
+        <label>Base (rpm)</label>
+        <input type="number" value="${cfg.base_speed}" min="-${meta.maxRpm}" max="${meta.maxRpm}" step="${meta.step}" onchange="updateManualAxisField('${axisKey}', 'base_speed', this.value)">
+      </div>
+      <div class="form-row">
+        <label>Amplitude</label>
+        <input type="number" value="${cfg.amplitude}" min="0" max="${meta.maxRpm}" step="${meta.ampStep}" onchange="updateManualAxisField('${axisKey}', 'amplitude', this.value)">
+      </div>
+      <div class="form-row">
+        <label>Period (s)</label>
+        <input type="number" value="${cfg.period}" min="0.1" max="600" step="0.1" onchange="updateManualAxisField('${axisKey}', 'period', this.value)">
+      </div>
+      <div class="func-desc">${formatAxisExpression(axisKey, cfg)}</div>
+      <div class="btn-row">
+        <button class="btn-connect" onclick="runManualAxis('${axisKey}')">Run ${axisKey}</button>
+        <button class="btn-disconnect" onclick="stopManualAxis('${axisKey}')">Stop ${axisKey}</button>
+      </div>
+    </div>
+  `;
+}
+
+function renderManualControl() {
+  return renderManualAxis('outer') + renderManualAxis('inner');
+}
+
+function renderReactiveSections() {
+  document.getElementById('operationConditionRoot').innerHTML = renderOperationCondition();
+  document.getElementById('manualControlRoot').innerHTML = renderManualControl();
+  document.getElementById('dotLoop').classList.toggle('on', appState.running);
+}
+
+function normaliseControlConfig(config) {
+  const merged = cloneData(DEFAULT_CONTROL_CONFIG);
+  if (config?.outer) Object.assign(merged.outer, config.outer);
+  if (config?.inner) Object.assign(merged.inner, config.inner);
+  merged.outer.enabled = Boolean(merged.outer.enabled);
+  merged.inner.enabled = Boolean(merged.inner.enabled);
+  return merged;
+}
+
+const SUPERVISION_ACK_TOKEN = 'HUMAN_SUPERVISED_LIVE_MOTION';
+const IMU_MOUNT_CONFIRMATION_TOKEN = 'HUMAN_CONFIRMED_SAMPLE_PLATFORM';
+
+function notifySupervisionMessage(message) {
+  if (typeof toast === 'function') toast(message, 3600);
+  else alert(message);
+}
+
+function withSupervisionAck(config) {
+  if (!appState.supervisionAck) {
+    notifySupervisionMessage('안전 확인 체크박스를 먼저 체크하세요 (감독자 입회 + IMU sample_platform 장착)');
+    return null;
+  }
+  return {
+    ...cloneData(config),
+    supervision_ack: true,
+    supervision_token: SUPERVISION_ACK_TOKEN,
+    supervisor: 'operator',
+    imu_mount_location: 'sample_platform',
+    imu_mount_confirmation: IMU_MOUNT_CONFIRMATION_TOKEN,
+  };
+}
+
+function selectOperationCondition(name) {
+  const strategy = appState.strategyMap[name];
+  setAppState({
+    selectedStrategy: name,
+    strategyParams: cloneData(strategy?.params || {}),
+  });
+}
+
+function updateStrategyParam(key, value) {
+  const next = cloneData(appState.strategyParams);
+  next[key] = Number(value);
+  setAppState({ strategyParams: next });
+}
+
+function updateManualAxisField(axisKey, field, value) {
+  const next = cloneData(appState.controlConfig);
+  if (field === 'func_type') {
+    next[axisKey][field] = value;
+  } else {
+    let v = Number(value);
+    const meta = AXIS_META[axisKey];
+    if (Number.isFinite(v) && meta) {
+      // HTML5 min/max 우회 입력을 코드 레벨에서도 ±maxRpm 으로 클램프
+      if (field === 'base_speed')      v = Math.max(-meta.maxRpm, Math.min(meta.maxRpm, v));
+      else if (field === 'amplitude')  v = Math.max(0,            Math.min(meta.maxRpm, v));
+      else if (field === 'period')     v = Math.max(0.1,          Math.min(600,         v));
+    }
+    next[axisKey][field] = v;
+  }
+  setAppState({ controlConfig: next });
+}
+
+async function applyOperationCondition(runAfter = false) {
+  if (!appState.selectedStrategy) {
+    alert('조건을 선택하세요.');
+    return;
+  }
+  const r = await api('POST', '/api/strategy', {
+    name: appState.selectedStrategy,
+    params: appState.strategyParams,
+  });
+  if (!r.ok) {
+    alert('조건 적용 실패: ' + r.error);
+    return;
+  }
+  if (runAfter && !appState.running) {
+    const supervisedConfig = withSupervisionAck(appState.controlConfig);
+    if (!supervisedConfig) return;
+    const startResp = await api('POST', '/api/control/start', supervisedConfig);
+    if (!startResp.ok) {
+      alert('조건 실행 실패: ' + (startResp.error || '원인 미상'));
+      return;
+    }
+  }
+  setAppState({
+    activeStrategy: appState.selectedStrategy,
+    activeStrategyParams: cloneData(appState.strategyParams),
+    running: runAfter ? true : appState.running,
+  });
+}
+
+async function clearOperationCondition() {
+  await api('POST', '/api/strategy', { name: '', params: {} });
+  const hasEnabledAxis = appState.controlConfig.outer.enabled || appState.controlConfig.inner.enabled;
+  if (!hasEnabledAxis && appState.running) {
+    await api('POST', '/api/control/stop');
+  }
+  setAppState({
+    selectedStrategy: '',
+    activeStrategy: '',
+    activeStrategyParams: {},
+    strategyParams: {},
+    running: hasEnabledAxis ? appState.running : false,
+  });
+}
+
+async function syncManualOperation(nextConfig) {
+  if (appState.activeStrategy) {
+    await api('POST', '/api/strategy', { name: '', params: {} });
+  }
+  const hasEnabledAxis = nextConfig.outer.enabled || nextConfig.inner.enabled;
+  if (hasEnabledAxis) {
+    const path = appState.running ? '/api/control/config' : '/api/control/start';
+    const supervisedConfig = withSupervisionAck(nextConfig);
+    if (!supervisedConfig) return;
+    const r = await api('POST', path, supervisedConfig);
+    if (!r.ok) {
+      alert('수동 운전 적용 실패: ' + (r.error || '원인 미상'));
+      return;
+    }
+  } else if (appState.running) {
+    await api('POST', '/api/control/stop');
+  }
+  setAppState({
+    controlConfig: nextConfig,
+    running: hasEnabledAxis,
+    activeStrategy: '',
+    activeStrategyParams: {},
+  });
+}
+
+async function runManualAxis(axisKey) {
+  const next = cloneData(appState.controlConfig);
+  next[axisKey].enabled = true;
+  await syncManualOperation(next);
+}
+
+async function stopManualAxis(axisKey) {
+  const next = cloneData(appState.controlConfig);
+  next[axisKey].enabled = false;
+  await syncManualOperation(next);
+}
+
+async function stopAllMotion() {
+  // 기존 클리노스텟 정지가 항상 먼저다. SpaceBio 펌프 정지는 그 결과와
+  // 무관하게 별도 bounded 요청으로 이어진다 (설계 스펙 6.1).
+  let clinostatOk = true;
+  try {
+    await api('POST', '/api/control/stop');
+    const next = cloneData(appState.controlConfig);
+    next.outer.enabled = false;
+    next.inner.enabled = false;
+    setAppState({ running: false, controlConfig: next });
+  } catch (err) {
+    clinostatOk = false;
+    spacebioLog('클리노스텟 정지 실패: ' + err);
+  }
+  let pumpOk = true;
+  try {
+    await spacebioFetch('/api/spacebio/pump/stop', { method: 'POST', body: {} });
+  } catch (err) {
+    pumpOk = false;
+  }
+  spacebioLog('STOP ALL — 클리노스텟 ' + (clinostatOk ? 'OK' : '실패')
+              + ' / 모의펌프 ' + (pumpOk ? 'OK' : '실패'));
+}
+
+async function refreshStrategies() {
+  const r = await api('GET', '/api/strategies');
+  const strategyMap = {};
+  r.strategies.forEach((strategy) => {
+    strategyMap[strategy.name] = strategy;
+  });
+  setAppState({
+    strategies: r.strategies,
+    strategyMap,
+    selectedStrategy: appState.selectedStrategy || r.current || '',
+  });
+  if (!appState.strategyParams || Object.keys(appState.strategyParams).length === 0) {
+    const current = strategyMap[appState.selectedStrategy || r.current || ''];
+    setAppState({ strategyParams: cloneData(current?.params || {}) });
+  }
+}
+
+async function saveRun() {
+  const r = await api('POST', '/api/run/save');
+  if (r.ok) alert('저장됨: ' + r.path);
+  else alert('저장 실패');
+}
+
+// ====== Chart.js 실시간 차트 ======
+const MAX_POINTS = 200;  // 10초분 (20Hz * 10)
+const chartData = {
+  labels: [],
+  datasets: [
+    {
+      label: 'Outer (AC Servo)',
+      data: [],
+      borderColor: '#4cc9f0',
+      borderWidth: 2,
+      pointRadius: 0,
+      tension: 0.3,
+    },
+    {
+      label: 'Inner (BLDC)',
+      data: [],
+      borderColor: '#0cca4a',
+      borderWidth: 2,
+      pointRadius: 0,
+      tension: 0.3,
+    }
+  ]
+};
+
+const chart = new Chart(document.getElementById('speedChart'), {
+  type: 'line',
+  data: chartData,
+  options: {
+    responsive: true,
+    maintainAspectRatio: false,
+    animation: false,
+    scales: {
+      x: {
+        display: true,
+        title: { display: true, text: 'Time (s)', color: '#999' },
+        ticks: { color: '#666', maxTicksLimit: 10 },
+        grid: { color: '#2a2a4a' },
+      },
+      y: {
+        display: true,
+        title: { display: true, text: 'RPM (출력축)', color: '#999' },
+        ticks: { color: '#666' },
+        grid: { color: '#2a2a4a' },
+      }
+    },
+    plugins: {
+      legend: { labels: { color: '#ccc' } }
+    }
+  }
+});
+
+// ====== 메트릭 차트 (밴드, taSMG) ======
+const bandChartData = {
+  labels: ['0-10', '10-20', '20-30', '30-40', '40-50', '50-60', '60-70', '70-80', '80-90'],
+  datasets: [
+    { label: 'cmd', data: [0,0,0,0,0,0,0,0,0], backgroundColor: 'rgba(76, 201, 240, 0.7)' },
+    { label: 'meas', data: [0,0,0,0,0,0,0,0,0], backgroundColor: 'rgba(248, 150, 30, 0.7)' },
+  ]
+};
+const bandChart = new Chart(document.getElementById('bandChart'), {
+  type: 'bar',
+  data: bandChartData,
+  options: {
+    responsive: true,
+    maintainAspectRatio: false,
+    animation: false,
+    scales: {
+      x: { ticks: { color: '#888', font: { size: 9 } }, grid: { color: '#2a2a4a' },
+           title: { display: true, text: '|lat| band (°)', color: '#888', font:{size:10}} },
+      y: { ticks: { color: '#888' }, grid: { color: '#2a2a4a' },
+           title: { display: true, text: 'D (1 = ideal)', color: '#888', font:{size:10}},
+           min: 0, suggestedMax: 2.5 }
+    },
+    plugins: {
+      legend: { labels: { color: '#ccc', font: { size: 10 } } },
+      annotation: false,
+    }
+  }
+});
+
+const MAX_TASMG_PTS = 600;
+const tasmgData = {
+  labels: [],
+  datasets: [
+    { label: 'cmd |ḡ|', data: [], borderColor: '#4cc9f0', backgroundColor: 'transparent',
+      borderWidth: 1.5, pointRadius: 0 },
+    { label: 'meas |ḡ|', data: [], borderColor: '#f8961e', backgroundColor: 'transparent',
+      borderWidth: 1.5, pointRadius: 0 },
+    { label: '10⁻³ G', data: [], borderColor: '#888', borderDash: [4,4],
+      borderWidth: 1, pointRadius: 0 },
+  ]
+};
+const tasmgChart = new Chart(document.getElementById('tasmgChart'), {
+  type: 'line',
+  data: tasmgData,
+  options: {
+    responsive: true,
+    maintainAspectRatio: false,
+    animation: false,
+    scales: {
+      x: { ticks: { color: '#888', maxTicksLimit: 8, font:{size:9} },
+           grid: { color: '#2a2a4a' },
+           title: { display: true, text: 't (s)', color: '#888', font:{size:10}} },
+      y: { type: 'logarithmic',
+           ticks: { color: '#888', font:{size:9} },
+           grid: { color: '#2a2a4a' },
+           title: { display: true, text: '|ḡ| (G)', color: '#888', font:{size:10}},
+           min: 1e-4, max: 2 }
+    },
+    plugins: { legend: { labels: { color: '#ccc', font:{size:10} } } }
+  }
+});
+
+// 단위구 (Plotly) — 초기 빈 산점
+const sphereLayout = {
+  paper_bgcolor: '#16213e', plot_bgcolor: '#16213e',
+  margin: { l: 0, r: 0, t: 0, b: 0 },
+  scene: {
+    bgcolor: '#16213e',
+    xaxis: { range: [-1.1, 1.1], color: '#666', gridcolor: '#2a2a4a' },
+    yaxis: { range: [-1.1, 1.1], color: '#666', gridcolor: '#2a2a4a' },
+    zaxis: { range: [-1.1, 1.1], color: '#666', gridcolor: '#2a2a4a' },
+    aspectmode: 'cube',
+  },
+};
+Plotly.newPlot('sphereDiv', [{
+  type: 'scatter3d', mode: 'markers',
+  x: [], y: [], z: [],
+  marker: { size: 3, color: '#4cc9f0', opacity: 0.8 },
+}], sphereLayout, { displayModeBar: false, responsive: true });
+
+async function refreshSphere() {
+  const src = document.getElementById('sphereSrc').value;
+  try {
+    const r = await api('GET', `/api/sphere?source=${src}&max_points=800`);
+    if (!r.points || r.points.length === 0) return;
+    const x = r.points.map(p => p[0]);
+    const y = r.points.map(p => p[1]);
+    const z = r.points.map(p => p[2]);
+    const idx = r.points.map((_, i) => i);
+    Plotly.react('sphereDiv', [{
+      type: 'scatter3d', mode: 'markers',
+      x, y, z,
+      marker: { size: 3, color: idx, colorscale: 'Viridis', opacity: 0.85 },
+    }], sphereLayout, { displayModeBar: false, responsive: true });
+  } catch (e) {}
+}
+setInterval(refreshSphere, 2000);   // 2초마다 단위구 갱신
+
+function colorClassI5(v) {
+  if (v === null || v === undefined) return '';
+  const d = Math.abs(v - 1.0);
+  if (d < 0.2) return 'good';
+  if (d < 1.0) return 'warn';
+  return 'bad';
+}
+
+// ====== 카메라 (USB 웹캠 MJPEG) ======
+let camOn = false;
+let camFrameCount = 0;
+let camFpsTimer = null;
+let camAspectKey = '';
+let camNativeWidth = 640;
+let camNativeHeight = 480;
+let camResizeToken = 0;
+
+function resizeCameraFrame() {
+  // 라이브 스트립 모드: 크기는 CSS(height:72px + aspect-ratio)가 결정.
+  // 인라인 width/height 를 부여하지 않음 — applyCameraAspect 가
+  // --cam-aspect-ratio 변수만 갱신하면 종횡비는 자동으로 맞춰진다.
+}
+
+function scheduleCameraResize() {
+  if (camResizeToken) return;
+  camResizeToken = requestAnimationFrame(() => {
+    camResizeToken = 0;
+    resizeCameraFrame();
+  });
+}
+
+function applyCameraAspect(width, height) {
+  if (!width || !height) return;
+  camNativeWidth = width;
+  camNativeHeight = height;
+  const key = `${width}:${height}`;
+  const wrap = document.querySelector('.cam-wrap');
+  if (key !== camAspectKey) {
+    camAspectKey = key;
+    wrap.style.setProperty('--cam-aspect-ratio', `${width} / ${height}`);
+    wrap.style.setProperty('--cam-native-width', `${width}px`);
+    wrap.style.setProperty('--cam-native-height', `${height}px`);
+  }
+  scheduleCameraResize();
+}
+
+function syncCameraAspectFromImage() {
+  const img = document.getElementById('camImg');
+  if (img.naturalWidth && img.naturalHeight) {
+    applyCameraAspect(img.naturalWidth, img.naturalHeight);
+  }
+}
+
+async function refreshCameraStatus() {
+  try {
+    const st = await api('GET', '/api/camera/status');
+    applyCameraAspect(st.width, st.height);
+    const meta = [
+      `device: ${st.device || '/dev/video0'}`,
+      `${st.width}x${st.height}`,
+      `${st.fps}fps`,
+    ];
+    if (st.error) meta.push(`error: ${st.error}`);
+    document.getElementById('camMeta').textContent = meta.join('  |  ');
+  } catch (e) {}
+}
+
+function toggleCamera() {
+  const img = document.getElementById('camImg');
+  const ph  = document.getElementById('camPlaceholder');
+  const btn = document.getElementById('camToggle');
+  if (!camOn) {
+    // 캐시 무력화용 쿼리 — 같은 클라이언트의 재연결 시 stale 방지
+    refreshCameraStatus();
+    img.src = '/api/camera/stream?ts=' + Date.now();
+    img.style.display = 'block';
+    ph.style.display = 'none';
+    btn.classList.remove('off');
+    btn.textContent = '■ OFF';
+    camOn = true;
+    camFrameCount = 0;
+    img.addEventListener('load', _camOnFrame);
+    camFpsTimer = setInterval(_camTickFps, 1000);
+  } else {
+    img.removeEventListener('load', _camOnFrame);
+    img.src = '';
+    img.style.display = 'none';
+    ph.style.display = 'block';
+    btn.classList.add('off');
+    btn.textContent = '▶ ON';
+    camOn = false;
+    if (camFpsTimer) { clearInterval(camFpsTimer); camFpsTimer = null; }
+    document.getElementById('camFps').textContent = '—';
+  }
+}
+function _camOnFrame() {
+  camFrameCount++;
+  syncCameraAspectFromImage();
+}
+function _camTickFps() {
+  const fps = camFrameCount;
+  camFrameCount = 0;
+  document.getElementById('camFps').textContent = `${fps} fps`;
+}
+
+// ====== WebSocket 실시간 업데이트 ======
+let ws;
+let tasmgT0 = null;
+function connectWS() {
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  ws = new WebSocket(`${proto}//${location.host}/ws`);
+
+  ws.onmessage = (event) => {
+    const d = JSON.parse(event.data);
+    const nextStrategyName = d.strategy_name || '';
+    const nextParams = cloneData(d.strategy_params || {});
+    if (
+      d.running !== appState.running ||
+      nextStrategyName !== appState.activeStrategy ||
+      JSON.stringify(nextParams) !== JSON.stringify(appState.activeStrategyParams)
+    ) {
+      setAppState({
+        running: !!d.running,
+        activeStrategy: nextStrategyName,
+        activeStrategyParams: nextParams,
+      });
+    }
+
+    // 숫자 표시 (출력축 RPM 기준, 실측값 우선)
+    document.getElementById('valTime').textContent = d.elapsed.toFixed(1);
+    const outerShow = (d.outer_actual !== undefined && d.outer_actual !== 0) ? d.outer_actual : d.outer_rpm;
+    const innerShow = (d.inner_actual !== undefined && d.inner_actual !== 0) ? d.inner_actual : d.inner_rpm;
+    document.getElementById('valOuter').textContent = outerShow.toFixed(1);
+    document.getElementById('valInner').textContent = innerShow.toFixed(1);
+
+    // 센서
+    if (d.sensor && Object.keys(d.sensor).length > 0) {
+      document.getElementById('valRoll').textContent = (d.sensor.roll ?? 0).toFixed(2);
+      document.getElementById('valPitch').textContent = (d.sensor.pitch ?? 0).toFixed(2);
+      document.getElementById('valYaw').textContent = (d.sensor.yaw ?? 0).toFixed(2);
+      document.getElementById('valAx').textContent = (d.sensor.ax ?? 0).toFixed(4);
+      document.getElementById('valAy').textContent = (d.sensor.ay ?? 0).toFixed(4);
+      document.getElementById('valAz').textContent = (d.sensor.az ?? 0).toFixed(4);
+      document.getElementById('valWx').textContent = (d.sensor.wx ?? 0).toFixed(2);
+      document.getElementById('valWy').textContent = (d.sensor.wy ?? 0).toFixed(2);
+      document.getElementById('valWz').textContent = (d.sensor.wz ?? 0).toFixed(2);
+    }
+
+    // 차트 업데이트 (루프 실행 중일때만, RPM — 실측값 우선, 없으면 명령)
+    if (d.running) {
+      const outerPlot = (d.outer_actual !== undefined && d.outer_actual !== 0) ? d.outer_actual : d.outer_rpm;
+      const innerPlot = (d.inner_actual !== undefined && d.inner_actual !== 0) ? d.inner_actual : d.inner_rpm;
+      chartData.labels.push(d.elapsed.toFixed(1));
+      chartData.datasets[0].data.push(outerPlot ?? 0);
+      chartData.datasets[1].data.push(innerPlot ?? 0);
+
+      if (chartData.labels.length > MAX_POINTS) {
+        chartData.labels.shift();
+        chartData.datasets[0].data.shift();
+        chartData.datasets[1].data.shift();
+      }
+      chart.update('none');
+
+    }
+
+    // ===== 논문 메트릭 업데이트 =====
+    const mc = d.metrics_cmd  || {};
+    const mm = d.metrics_meas || {};
+    const setI5 = (id, v) => {
+      const el = document.getElementById(id);
+      el.classList.remove('good','warn','bad');
+      if (v === undefined || v === null) { el.textContent = '—'; return; }
+      el.textContent = v.toFixed(3);
+      el.classList.add(colorClassI5(v));
+    };
+    setI5('I5cmd',  mc.I5);
+    setI5('I5meas', mm.I5);
+    document.getElementById('NcmdI').textContent  = (mc.n ?? 0).toLocaleString();
+    document.getElementById('NmeasI').textContent = (mm.n ?? 0).toLocaleString();
+    document.getElementById('Dstdcmd').textContent  = mc.D_std  !== undefined ? mc.D_std.toFixed(3) : '—';
+    document.getElementById('Dstdmeas').textContent = mm.D_std  !== undefined ? mm.D_std.toFixed(3) : '—';
+    document.getElementById('chi2cmd').textContent  = mc.chi2   !== undefined ? mc.chi2.toFixed(0) : '—';
+    document.getElementById('chi2meas').textContent = mm.chi2   !== undefined ? mm.chi2.toFixed(0) : '—';
+
+    // 9-band 막대
+    if (mc.D && mc.D.length === 9) bandChartData.datasets[0].data = mc.D;
+    if (mm.D && mm.D.length === 9) bandChartData.datasets[1].data = mm.D;
+    bandChart.update('none');
+
+    // taSMG 시계열
+    if (d.running && d.elapsed !== undefined) {
+      if (tasmgT0 === null) tasmgT0 = d.elapsed;
+      const t = d.elapsed - tasmgT0;
+      tasmgData.labels.push(t.toFixed(1));
+      tasmgData.datasets[0].data.push(Math.max(mc.tasmg_G ?? 0, 1e-5));
+      tasmgData.datasets[1].data.push(mm.tasmg_G ? Math.max(mm.tasmg_G, 1e-5) : null);
+      tasmgData.datasets[2].data.push(1e-3);
+      while (tasmgData.labels.length > MAX_TASMG_PTS) {
+        tasmgData.labels.shift();
+        tasmgData.datasets.forEach(ds => ds.data.shift());
+      }
+      tasmgChart.update('none');
+    } else if (!d.running) {
+      tasmgT0 = null;  // reset on stop
+    }
+  };
+
+  ws.onclose = () => {
+    setTimeout(connectWS, 1000);
+  };
+}
+
+// ====== 초기화 ======
+window.addEventListener('load', async () => {
+  await refreshPorts();
+  await refreshCameraStatus();
+  const st = await api('GET', '/api/control/status');
+  setAppState({
+    running: !!st.running,
+    activeStrategy: st.strategy || '',
+    activeStrategyParams: cloneData(st.strategy_params || {}),
+    selectedStrategy: st.strategy || '',
+    strategyParams: cloneData(st.strategy_params || {}),
+    controlConfig: normaliseControlConfig(st.config),
+  });
+  await refreshStrategies();
+
+  if (st.ac_connected) {
+    document.getElementById('dotAC').classList.add('on');
+    document.getElementById('btnAcConn').disabled = true;
+    document.getElementById('btnAcDisc').disabled = false;
+  }
+  if (st.bldc_connected) {
+    document.getElementById('dotBLDC').classList.add('on');
+    document.getElementById('btnBldcConn').disabled = true;
+    document.getElementById('btnBldcDisc').disabled = false;
+  }
+  if (st.sensor_connected) {
+    document.getElementById('dotSensor').classList.add('on');
+    document.getElementById('btnSensConn').disabled = true;
+    document.getElementById('btnSensDisc').disabled = false;
+  }
+
+  connectWS();
+});
+window.addEventListener('resize', scheduleCameraResize);
+</script>
+
+<style>
+/* SpaceBio Integration — 기존 스타일에 영향 주지 않도록 전부 #spacebioPanel 하위로 한정 */
+#spacebioPanel { margin-top: 24px; padding: 16px; background: var(--surface);
+  border-radius: var(--radius); border: 1px solid rgba(76,201,240,.25); }
+#spacebioPanel h2 { margin: 0 0 4px; font-size: 18px; color: var(--blue); }
+#spacebioPanel .sb-sub { color: var(--text-dim); font-size: 12px; margin-bottom: 14px; }
+#spacebioPanel .sb-grid { display: grid; gap: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+/* ── IMU 9개 값을 1행 9열로 압축 (2026-07-29) ────────────────────────────
+   Roll/Pitch/Yaw · Accel XYZ · Gyro XYZ 가 3행 3열로 화면 위쪽을 크게 차지해
+   아래 그래프·카메라가 밀렸다. 한 줄로 줄인다.
+   ⚠ 기존 규칙(.sensor-grid/.sensor-card)을 고치지 않고 **뒤에서 덮어쓴다** —
+     work 는 baseline 에 덧붙이기만 해야 한다는 계약이 있다
+     (test_work_copies_are_a_superset_of_the_captured_baseline). */
+.sensor-grid { grid-template-columns: repeat(9, 1fr); gap: 6px; }
+.sensor-card { padding: 6px 4px; min-width: 0; }   /* min-width:0 — grid 항목이 내용 때문에 안 줄어드는 것 방지 */
+/* 라벨이 열 너비보다 길다("Gyro X (deg/s)") — 줄바꿈 대신 말줄임으로 높이를 고정한다. */
+.sensor-card .label {
+  font-size: 0.62em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sensor-card .value { font-size: 0.95em; }
+/* 좁은 화면에서 9열은 읽을 수 없다 — 원래 3열로 돌린다. */
+@media (max-width: 900px) {
+  .sensor-grid { grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  .sensor-card { padding: 10px 8px; }
+  .sensor-card .label { font-size: 0.72em; white-space: normal; }
+  .sensor-card .value { font-size: 1.2em; }
+}
+
+#spacebioPanel .sb-card { background: var(--card); border-radius: var(--radius); padding: 12px; }
+/* 저항 추이 그래프 높이 — 클리노스텟 RPM 그래프와 같은 크기로 맞춘다.
+   Chart.js maintainAspectRatio:false 는 컨테이너 높이를 따르므로 여기서 고정한다. */
+/* 세션·측정 관계 안내. 지금 눌러야 할 것과 기록 여부를 한 줄로 알려준다. */
+#spacebioPanel .sb-hint { margin-top: 6px; font-size: 12px; line-height: 1.5; opacity: .85; }
+/* 저장 경로는 길어서 줄바꿈을 허용하고 등폭으로 보여준다. */
+#spacebioPanel .sb-path { font-family: ui-monospace, Menlo, monospace; font-size: 11px;
+  word-break: break-all; text-align: right; max-width: 62%; }
+#spacebioPanel .sb-hint.warn { color: #ffb703; opacity: 1; }
+#spacebioPanel .sb-chart-wrap { position: relative; height: 280px; }
+#spacebioPanel .sb-chart-wrap canvas { width: 100% !important; height: 100% !important; }
+#spacebioPanel .sb-card h3 { margin: 0 0 10px; font-size: 14px; color: var(--text); }
+#spacebioPanel .sb-row { display: flex; justify-content: space-between; gap: 8px;
+  padding: 3px 0; font-size: 13px; }
+#spacebioPanel .sb-row span:last-child { color: var(--blue); font-variant-numeric: tabular-nums; }
+#spacebioPanel label { display: block; font-size: 12px; color: var(--text-dim); margin: 6px 0 2px; }
+#spacebioPanel input, #spacebioPanel select { width: 100%; box-sizing: border-box; padding: 6px;
+  background: var(--bg); color: var(--text); border: 1px solid rgba(255,255,255,.15);
+  border-radius: 6px; font-size: 13px; }
+#spacebioPanel button { padding: 7px 12px; margin: 8px 6px 0 0; border: 0; cursor: pointer;
+  border-radius: 6px; background: var(--blue); color: #06263a; font-weight: 600; font-size: 13px; }
+#spacebioPanel button.sb-danger { background: var(--accent); color: #fff; }
+#spacebioPanel button:disabled { opacity: .4; cursor: not-allowed; }
+#spacebioPanel .sb-badge { display: inline-block; padding: 2px 8px; border-radius: 999px;
+  font-size: 11px; font-weight: 700; background: var(--orange); color: #2b1a00; }
+/* 실측(라이브) 모드는 초록 배지로 모의와 시각 구분한다. */
+#spacebioPanel .sb-badge.sb-live { background: var(--green); color: #06280f; }
+#spacebioPanel .sb-latched { color: var(--accent); font-weight: 700; }
+#spacebioPanel.sb-stale { opacity: .65; }
+#spacebioPanel .sb-err { color: var(--accent); font-size: 12px; min-height: 16px; }
+#spacebioPanel #spacebioEvents { max-height: 130px; overflow-y: auto; font-size: 12px;
+  color: var(--text-dim); background: var(--bg); border-radius: 6px; padding: 8px;
+  white-space: pre-wrap; }
+#spacebioPanel canvas { max-width: 100%; }
+</style>
+
+<div id="spacebioPanel">
+  <h2>SpaceBio Integration</h2>
+  <div class="sb-sub" id="spacebioSubtitle">저항센서 · 펌프 · 통합 세션 기록</div>
+
+  <div class="sb-grid">
+    <!-- Gateway 카드를 여기로 합쳤다. 세션은 측정 시작/정지가 알아서 열고 닫으므로
+         운영자가 볼 것은 "실험명 → 측정 시작"과 "어디에 저장되는가" 둘뿐이다. -->
+    <div class="sb-card">
+      <h3>저항센서 <span class="sb-badge" id="resistanceModeBadge">-</span></h3>
+      <!-- 실기 BLE 센서 전용. CSV 재생·합성 신호·USB 시리얼 모드는 화면에서 제거했다
+           (백엔드에는 남아 있어 필요하면 API로 직접 설정할 수 있다). -->
+      <div class="sb-row"><span>연결</span><span>BLE 무선 (ResistanceSensor)</span></div>
+      <label for="spacebioExperimentName">실험명</label>
+      <input id="spacebioExperimentName" type="text" value="resistance-run">
+
+      <!-- 기존 앱(frontend_ble_web.py)이 열어두던 설정 둘. 나머지 파라미터
+           (sampling 50 Hz, gain 1, PGA 8)는 펌웨어 고정값이라 열지 않는다. -->
+      <label for="resistanceRref">레퍼런스 저항 Rref (Ω)</label>
+      <input id="resistanceRref" type="number" value="10000" min="100" max="1000000" step="100">
+      <label for="resistanceAvgFactor">시간평균 계수 N (1 = 평균 안 함)</label>
+      <input id="resistanceAvgFactor" type="number" value="1" min="1" max="200" step="1">
+      <div class="sb-hint" id="resistanceSettingHint"></div>
+
+      <button id="resistanceStart">측정 시작</button>
+      <button id="resistanceStop">측정 정지</button>
+      <div class="sb-hint" id="spacebioRecordingHint"></div>
+
+      <div class="sb-row"><span>저항</span><span id="resistanceValue">-</span></div>
+      <div class="sb-row"><span>ΔR/R₀</span><span id="resistanceDelta">-</span></div>
+      <div class="sb-row"><span>raw ADC</span><span id="resistanceAdc">-</span></div>
+      <div class="sb-row"><span>온도 (°C)</span><span id="resistanceTemperature">-</span></div>
+      <div class="sb-row"><span>배터리 (%)</span><span id="resistanceBattery">-</span></div>
+    </div>
+
+    <div class="sb-card">
+      <h3>기록</h3>
+      <div class="sb-row"><span>기록 상태</span><span id="spacebioSessionRecordingState">idle</span></div>
+      <div class="sb-row"><span>세션 ID</span><span id="spacebioSessionId">-</span></div>
+      <div class="sb-row"><span>시작 시각</span><span id="spacebioSessionStartedAt">-</span></div>
+      <div class="sb-row"><span>경과</span><span id="spacebioSessionElapsed">-</span></div>
+      <div class="sb-row"><span>저장 위치</span><span class="sb-path" id="spacebioDataPath">-</span></div>
+      <div class="sb-hint" id="spacebioStorageHint"></div>
+      <div class="sb-row"><span>Gateway</span><span id="spacebioGatewayState">-</span></div>
+      <div class="sb-row"><span>마지막 응답</span><span id="spacebioGatewayLastSeen">-</span></div>
+      <div class="sb-err" id="spacebioGatewayError"></div>
+    </div>
+
+    <div class="sb-card">
+      <h3>펌프 <span class="sb-badge" id="pumpSimulatedBadge">-</span></h3>
+      <div class="sb-row"><span>상태</span><span id="pumpState">idle</span></div>
+      <div class="sb-row"><span>비상정지 래치</span><span id="pumpEstopLatched">해제됨</span></div>
+      <label for="pumpRate">유량 (µL/s, 1–200)</label>
+      <input id="pumpRate" type="number" value="50" step="0.1" min="1" max="200">
+      <label for="pumpTargetVolume">목표량 (µL, 1–1000)</label>
+      <input id="pumpTargetVolume" type="number" value="120" step="0.1" min="1" max="1000">
+      <div class="sb-row"><span>전달량</span><span id="pumpDeliveredVolume">0.0</span></div>
+      <div class="sb-row"><span>세션 누적</span><span id="pumpCumulativeVolume">0.0</span></div>
+      <button id="pumpDispense">주입</button>
+      <button id="pumpStop">정지</button>
+      <button id="pumpEmergencyStop" class="sb-danger">비상 정지</button>
+      <label for="pumpStepCount">스텝 수</label>
+      <input id="pumpStepCount" type="number" value="200" step="1" min="1">
+      <label for="pumpStepSpm">스텝 속도 (spm, 1–2400)</label>
+      <input id="pumpStepSpm" type="number" value="1200" step="1" min="1" max="2400">
+      <div class="sb-row"><span>위치 (steps)</span><span id="pumpPositionSteps">-</span></div>
+      <button id="pumpSendSteps">스텝 전송</button>
+      <label for="pumpResetAcknowledgement">해제 확인 문구를 정확히 입력</label>
+      <input id="pumpResetAcknowledgement" type="text" placeholder="확인 문구">
+      <button id="pumpResetEmergencyStop" disabled>비상정지 해제</button>
+    </div>
+  </div>
+
+  <div class="sb-card" style="margin-top:14px">
+    <h3>저항 추이</h3>
+    <!-- Chart.js가 maintainAspectRatio:false 라 컨테이너 높이를 그대로 따른다.
+         높이 제약이 없으면 무한정 커지므로 클리노스텟 RPM 그래프(.chart-card
+         360px − padding − footer ≈ 280px)와 같은 크기로 고정한다. -->
+    <div class="sb-chart-wrap"><canvas id="resistanceChart"></canvas></div>
+  </div>
+
+  <div class="sb-card" style="margin-top:14px">
+    <h3>이벤트</h3>
+    <div id="spacebioEvents"></div>
+  </div>
+</div>
+
+<script>
+// ====== SpaceBio Integration ======
+// 브라우저는 Gateway에 직접 접속하지 않는다. 항상 :8000의 /api/spacebio/* 를 경유한다.
+const SPACEBIO_ESTOP_ACK = 'RESET_SIMULATED_PUMP_ESTOP';
+const SPACEBIO_BACKOFF = [1000, 2000, 4000, 8000, 10000];
+const SPACEBIO_STALE_MS = 3000;
+const SPACEBIO_MAX_POINTS = 1800;
+const SPACEBIO_RENDER_MS = 200;   // 5 Hz 상한
+
+let spacebioWs = null;
+let spacebioBackoffIndex = 0;
+let spacebioLastSeenAt = 0;
+let spacebioLastSequence = null;
+let spacebioSessionStartedAt = null;
+//: 버튼 활성/비활성 판단의 근거. 상태 갱신 때마다 status에서 받아 채운다.
+let spacebioSessionState = 'idle';
+let spacebioSensorState = 'idle';
+//: 마지막으로 차트에 찍은 보드 타임스탬프. 같은 샘플을 두 번 찍지 않기 위한 것.
+let spacebioLastPlottedTs = null;
+let spacebioLastRender = 0;
+let spacebioChart = null;
+
+const sbEl = (id) => document.getElementById(id);
+
+function spacebioLog(message) {
+  const box = sbEl('spacebioEvents');
+  if (!box) return;
+  const now = new Date().toLocaleTimeString();
+  box.textContent = '[' + now + '] ' + message + '\n' + box.textContent;
+}
+
+async function spacebioFetch(path, options) {
+  const opts = options || {};
+  const init = { method: opts.method || 'GET', headers: { 'Content-Type': 'application/json' } };
+  if (opts.body !== undefined) init.body = JSON.stringify(opts.body);
+  const res = await fetch(path, init);
+  const payload = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const err = (payload && payload.error) || { code: 'error', message: res.statusText };
+    // 백엔드 메시지는 영어 원문이라 현장에서 읽기 어렵다. 자주 나오는 충돌은
+    // 무엇을 해야 하는지까지 한국어로 알려준다.
+    const friendly = {
+      sensor_conflict: '측정이 이미 실행 중입니다. ③ 측정 정지를 먼저 누르세요.',
+      conflict: '세션이 이미 열려 있습니다. ④ 세션 종료를 먼저 누르세요.',
+      validation_error: '요청 값이 올바르지 않습니다. 세션이 열려 있는지 확인하세요.',
+      pump_offline: '펌프 보드가 브로커에 연결돼 있지 않습니다.',
+      gateway_unreachable: 'Gateway 응답이 없습니다. 잠시 후 다시 시도하세요.',
+    }[err.code];
+    sbEl('spacebioGatewayError').textContent = friendly || (err.code + ': ' + err.message);
+    spacebioLog('오류 ' + res.status + ' — ' + (friendly || err.code));
+    throw new Error(err.code);
+  }
+  sbEl('spacebioGatewayError').textContent = '';
+  return payload.data;
+}
+
+// Gateway가 죽어도 기존 클리노스텟 컨트롤은 그대로 쓸 수 있어야 한다.
+// 여기서는 SpaceBio 패널 안의 컨트롤만 비활성화한다.
+function spacebioSetStale(isStale) {
+  const panel = sbEl('spacebioPanel');
+  if (!panel) return;
+  panel.classList.toggle('sb-stale', isStale);
+  panel.querySelectorAll('button, input, select').forEach((node) => {
+    if (node.id === 'pumpResetEmergencyStop') return;
+    node.disabled = isStale;
+  });
+  if (isStale) {
+    sbEl('spacebioGatewayState').textContent = 'degraded (응답 없음)';
+  } else {
+    // 위 루프가 전부 되살렸으므로, 상태에 맞는 비활성화를 다시 입힌다.
+    spacebioSyncActionButtons();
+  }
+  spacebioSyncResetButton();
+}
+
+function spacebioSyncResetButton() {
+  const typed = sbEl('pumpResetAcknowledgement').value;
+  const button = sbEl('pumpResetEmergencyStop');
+  button.disabled = typed !== SPACEBIO_ESTOP_ACK;
+}
+
+// ── 세션과 측정의 관계를 UI가 강제한다 ────────────────────────────────
+//
+// 둘은 대등해 보이지만 하는 일이 다르다:
+//   세션 = 데이터를 파일로 **기록**하는 구간
+//   측정 = 센서 스트림을 **받는** 동작
+// 기록하려면 세션이 먼저 열려 있어야 한다. 세션 없이 측정만 하면 화면에는
+// 보이지만 저장은 안 된다 — 예전엔 그 사실이 어디에도 드러나지 않았다.
+// 또 이미 도는 상태에서 시작을 다시 누르면 백엔드가 409를 냈는데, 애초에
+// 누를 수 없게 막는 편이 낫다.
+function spacebioSyncActionButtons() {
+  const measuring = spacebioSensorState === 'running';
+  sbEl('resistanceStart').disabled = measuring;
+  sbEl('resistanceStop').disabled = !measuring;
+  sbEl('spacebioExperimentName').disabled = measuring;   // 측정 중 실험명 변경 금지
+  // Rref는 장치 설정이라 바꾸면 펌웨어가 baseline을 재설정한다 — 측정 중 변경은
+  // 기록을 불연속하게 만들므로 잠근다. 평균 계수도 같은 이유로 구간마다 고정한다.
+  sbEl('resistanceRref').disabled = measuring;
+  sbEl('resistanceAvgFactor').disabled = measuring;
+
+  const hint = sbEl('spacebioRecordingHint');
+  hint.classList.remove('warn');
+  hint.textContent = measuring
+    ? '기록 중입니다. 정지하면 세션이 닫히고 파일이 확정됩니다.'
+    : '실험명을 넣고 측정 시작을 누르면 세션이 자동으로 만들어집니다.';
+}
+
+// 세션은 측정 시작/정지가 알아서 연다. 운영자가 따로 누를 버튼은 없다.
+async function spacebioStartSession() {
+  const stamp = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  // ⚠ 서버가 세션 ID 형식을 강제한다: ^spacebio_\d{8}_\d{6}_[A-Za-z0-9]+$
+  //   접두사·자릿수를 지켜야 하고 꼬리표는 **영숫자만** 된다(하이픈·밑줄 불가).
+  //   그래서 실험명은 영숫자만 남겨 꼬리표로 쓴다 — 폴더명만 봐도 어느 실험인지
+  //   알 수 있고, 원본 실험명은 experiment_name 으로 manifest.json 에 남는다.
+  const tag = (sbEl('spacebioExperimentName').value || '')
+    .replace(/[^A-Za-z0-9]/g, '').slice(0, 24)
+    || Math.random().toString(36).replace(/[^a-z0-9]/g, '').slice(0, 4) || 'run';
+  const sid = 'spacebio_' + stamp.getFullYear() + pad(stamp.getMonth() + 1)
+    + pad(stamp.getDate()) + '_' + pad(stamp.getHours()) + pad(stamp.getMinutes())
+    + pad(stamp.getSeconds()) + '_' + tag;
+  await spacebioFetch('/api/spacebio/session/start', { method: 'POST', body: {
+    session_id: sid, experiment_name: sbEl('spacebioExperimentName').value,
+    started_at: stamp.toISOString() } });
+  spacebioLog('세션 시작: ' + sid);
+  return sid;
+}
+
+async function spacebioFinishSession() {
+  const current = sbEl('spacebioSessionId').textContent;
+  if (spacebioSessionState !== 'recording' || !current || current === '-') {
+    return null;      // 열린 세션이 없으면 조용히 넘어간다 (422 방지)
+  }
+  await spacebioFetch('/api/spacebio/session/finish', { method: 'POST', body: {
+    session_id: current, finished_at: new Date().toISOString(),
+    clinostat_run_id: null } });
+  return current;
+}
+
+async function spacebioResetEstop() {
+  // 운영자가 실제로 입력한 문자열을 그대로 보낸다. 숨은 상수를 대신 보내면
+  // 확인 절차 자체가 무의미해진다.
+  const field = sbEl('pumpResetAcknowledgement');
+  const typed = field.value;
+  await spacebioFetch('/api/spacebio/pump/reset-emergency-stop',
+                      { method: 'POST', body: { acknowledgement: typed } });
+  field.value = '';
+  spacebioSyncResetButton();
+  spacebioLog('비상정지 해제됨');
+}
+
+async function spacebioConfigureSensor() {
+  // 화면은 실기 BLE 센서 전용이다. device_name/scan_timeout_s는 생략하면
+  // config.yaml의 ble.* 값을 쓴다.
+  //
+  // ⚠ Rref는 표시용 값이 아니라 **장치 설정**이다. 서버가 BLE 설정 특성에 써 넣고
+  //   펌웨어가 저항을 재계산하며 baseline을 재설정한다. 그래서 측정 중에는
+  //   바꾸지 못하게 막는다(기록이 불연속해진다).
+  const body = { mode: 'BLE_LIVE' };
+  const rref = Number(sbEl('resistanceRref').value);
+  const avg = Number(sbEl('resistanceAvgFactor').value);
+  if (Number.isFinite(rref) && rref >= 100 && rref <= 1000000) body.rref_ohm = rref;
+  if (Number.isFinite(avg) && avg >= 1 && avg <= 200) body.avg_factor = Math.round(avg);
+  await spacebioFetch('/api/spacebio/sensor/configure', { method: 'POST', body });
+}
+
+function spacebioRenderStatus(status) {
+  if (!status) return;
+  spacebioLastSeenAt = Date.now();
+  sbEl('spacebioGatewayState').textContent = status.gateway.state;
+  sbEl('spacebioGatewayLastSeen').textContent = new Date().toLocaleTimeString();
+
+  const session = status.session || {};
+  sbEl('spacebioSessionId').textContent = session.session_id || '-';
+  sbEl('spacebioSessionRecordingState').textContent = session.state || 'idle';
+  spacebioSessionState = session.state || 'idle';
+  const sensorStatus = status.sensor || {};
+  spacebioSensorState = sensorStatus.state || 'idle';
+  spacebioSyncActionButtons();
+
+  // 서버가 실제로 적용 중인 설정을 되비춘다 — 화면이 자기가 보낸 값을 되뇌지 않는다.
+  const settingHint = sbEl('resistanceSettingHint');
+  if (sensorStatus.rref_ohm != null || sensorStatus.avg_factor != null) {
+    const n = sensorStatus.avg_factor || 1;
+    const rate = n > 1 ? (36 / n).toFixed(1) : '36';
+    settingHint.textContent = '적용 중 · Rref '
+      + (sensorStatus.rref_ohm != null
+          ? (sensorStatus.rref_ohm / 1000).toFixed(3) + ' kΩ' : '(보드 기존값)')
+      + ' · 평균 N=' + n + ' → 약 ' + rate + ' Hz 기록';
+  } else {
+    settingHint.textContent = 'Rref는 보드에 기록되어 저항 계산과 baseline에 쓰입니다. '
+      + '평균 N을 올리면 잡음과 용량이 함께 줄어듭니다.';
+  }
+
+  // 저항 값이 어디에 쌓이는지. 경로는 서버가 알려준다(화면이 하드코딩하지 않는다).
+  sbEl('spacebioDataPath').textContent = session.data_dir
+    ? session.data_dir + '/sensor_samples.csv' : '-';
+  // 실측: 36 Hz × 106 B/행 ≈ 13 MB/시간. 얼마나 쌓였는지 감을 준다.
+  const elapsedS = spacebioSessionStartedAt
+    ? (Date.now() - spacebioSessionStartedAt) / 1000 : 0;
+  sbEl('spacebioStorageHint').textContent = session.data_dir
+    ? '약 13 MB/시간 (실측 36 Hz) · 현재 약 '
+      + (elapsedS * 13 / 3600).toFixed(1) + ' MB'
+    : '';
+  if (session.state === 'recording' && !spacebioSessionStartedAt) {
+    spacebioSessionStartedAt = Date.now();
+    sbEl('spacebioSessionStartedAt').textContent = new Date().toLocaleTimeString();
+  }
+  if (session.state !== 'recording') spacebioSessionStartedAt = null;
+  sbEl('spacebioSessionElapsed').textContent = spacebioSessionStartedAt
+    ? Math.round((Date.now() - spacebioSessionStartedAt) / 1000) + ' s' : '-';
+
+  const pump = status.pump || {};
+  sbEl('pumpState').textContent = pump.state;
+  // 배지는 실제 백엔드 모드를 반영한다 (하드코딩된 SIMULATED가 아니라).
+  const pumpBadge = sbEl('pumpSimulatedBadge');
+  if (pump.mode) {
+    pumpBadge.textContent = pump.mode === 'WIRELESS' ? '무선 실측' : '모의';
+    pumpBadge.classList.toggle('sb-live', pump.mode === 'WIRELESS');
+  }
+  const latched = sbEl('pumpEstopLatched');
+  latched.textContent = pump.estop_latched ? '래치됨 — 해제 필요' : '해제됨';
+  latched.classList.toggle('sb-latched', !!pump.estop_latched);
+  sbEl('pumpDeliveredVolume').textContent = (pump.delivered_volume_ul || 0).toFixed(1);
+  sbEl('pumpCumulativeVolume').textContent = (pump.session_cumulative_volume_ul || 0).toFixed(1);
+  if (pump.position_steps !== undefined && pump.position_steps !== null) {
+    sbEl('pumpPositionSteps').textContent = pump.position_steps;
+  }
+
+  const sensor = status.sensor || {};
+  // 센서 배지도 실제 모드를 반영한다.
+  const sensorBadge = sbEl('resistanceModeBadge');
+  if (sensor.mode) {
+    // 화면은 BLE 전용이지만, API로 다른 모드가 설정되면 그 사실이 배지에 그대로
+    // 드러나야 한다 — 모르는 모드는 원문을 보여준다.
+    sensorBadge.textContent = sensor.mode === 'BLE_LIVE' ? '실측 BLE' : sensor.mode;
+    sensorBadge.classList.toggle('sb-live', sensor.mode === 'BLE_LIVE');
+  }
+  const sample = sensor.sample;
+  if (sample) {
+    sbEl('resistanceValue').textContent = sample.resistance_ohm.toFixed(2) + ' Ω';
+    sbEl('resistanceDelta').textContent = sample.delta_r_over_r0.toExponential(3);
+    // 실기 센서는 raw ADC를 내지 않는다 — null이면 '—'로 표시(0으로 오해 금지).
+    sbEl('resistanceAdc').textContent =
+      sample.raw_adc === null || sample.raw_adc === undefined ? '—' : sample.raw_adc;
+    sbEl('resistanceTemperature').textContent = sample.temperature_c.toFixed(1);
+    sbEl('resistanceBattery').textContent = sample.battery_pct;
+    spacebioPushPoint(sample);
+  }
+}
+
+function spacebioResetChart() {
+  if (!spacebioChart) return;
+  spacebioChart.data.labels.length = 0;
+  spacebioChart.data.datasets[0].data.length = 0;
+  spacebioLastPlottedTs = null;
+  spacebioChart.update('none');
+}
+
+function spacebioPushPoint(sample) {
+  if (!spacebioChart) return;
+  // 정지 후에도 마지막 샘플은 status 에 남는다. 상태가 올 때마다 그대로 찍으면
+  // 같은 점이 계속 쌓여 선이 옆으로 늘어난다 — 도는 동안에만 그린다.
+  if (spacebioSensorState !== 'running') return;
+  // 상태 스트림(10Hz)이 같은 샘플을 여러 번 전할 수 있다. 특히 평균 N을 올리면
+  // 기록이 7.8Hz 라 중복이 잦다. 보드 타임스탬프로 새 샘플만 받는다.
+  if (sample.source_timestamp_ms === spacebioLastPlottedTs) return;
+  spacebioLastPlottedTs = sample.source_timestamp_ms;
+
+  const now = Date.now();
+  const data = spacebioChart.data;
+  data.labels.push((sample.session_elapsed_ms / 1000).toFixed(1));
+  data.datasets[0].data.push(sample.resistance_ohm);
+  while (data.labels.length > SPACEBIO_MAX_POINTS) {
+    data.labels.shift();
+    data.datasets[0].data.shift();
+  }
+  if (now - spacebioLastRender < SPACEBIO_RENDER_MS) return;
+  spacebioLastRender = now;
+  spacebioChart.update('none');
+}
+
+function spacebioConnect() {
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  spacebioWs = new WebSocket(proto + '//' + location.host + '/ws/spacebio');
+  spacebioWs.onopen = () => {
+    spacebioBackoffIndex = 0;
+    spacebioSetStale(false);
+    spacebioLog('Gateway 스트림 연결됨');
+  };
+  spacebioWs.onmessage = async (event) => {
+    const message = JSON.parse(event.data);
+    if (message.type !== 'status') return;
+    // sequence가 건너뛰면 중간 상태를 놓친 것이므로 전체 상태를 다시 받는다.
+    if (spacebioLastSequence !== null && message.sequence > spacebioLastSequence + 1) {
+      try {
+        spacebioRenderStatus(await spacebioFetch('/api/spacebio/status'));
+      } catch (err) { /* stale 감시자가 처리한다 */ }
+    }
+    spacebioLastSequence = message.sequence;
+    spacebioRenderStatus(message.data);
+  };
+  spacebioWs.onclose = () => {
+    const delay = SPACEBIO_BACKOFF[Math.min(spacebioBackoffIndex, SPACEBIO_BACKOFF.length - 1)];
+    spacebioBackoffIndex += 1;
+    setTimeout(spacebioConnect, delay);
+  };
+  spacebioWs.onerror = () => { if (spacebioWs) spacebioWs.close(); };
+}
+
+async function spacebioInit() {
+  spacebioChart = new Chart(sbEl('resistanceChart'), {
+    type: 'line',
+    data: { labels: [], datasets: [{ label: '저항 (Ω)', data: [], borderColor: '#4cc9f0',
+      borderWidth: 1.5, pointRadius: 0, tension: .2 }] },
+    options: { animation: false, responsive: true, maintainAspectRatio: false,
+      scales: { x: { title: { display: true, text: '세션 경과 (s)' } },
+                y: { title: { display: true, text: '저항 (Ω)' } } } },
+  });
+
+  sbEl('pumpResetAcknowledgement').addEventListener('input', spacebioSyncResetButton);
+  spacebioSyncResetButton();
+
+  // 측정 시작 = 세션 열기 + 센서 시작. 운영자가 두 단계를 순서대로 누르며
+  // 헷갈리던 것을 하나로 합쳤다. 세션이 이미 열려 있으면 그것을 그대로 쓴다.
+  sbEl('resistanceStart').onclick = async () => {
+    if (spacebioSessionState !== 'recording') {
+      await spacebioStartSession();
+    }
+    await spacebioConfigureSensor();
+    await spacebioFetch('/api/spacebio/sensor/start', { method: 'POST', body: {} });
+    // 새 측정은 빈 그래프에서 시작한다 — 이전 구간과 섞이면 x축이 뒤엉킨다.
+    spacebioResetChart();
+    spacebioLog('측정 시작 — 기록 중');
+  };
+  // 측정 정지 = 센서 정지 + 세션 닫기. 세션을 열어둔 채 두면 다음 측정이
+  // 같은 세션에 이어 붙어 실험 구분이 흐려진다.
+  sbEl('resistanceStop').onclick = async () => {
+    await spacebioFetch('/api/spacebio/sensor/stop', { method: 'POST', body: {} });
+    const finished = await spacebioFinishSession();
+    spacebioLog(finished ? '측정 정지 — 기록 저장 완료 (' + finished + ')' : '측정 정지');
+  };
+  sbEl('pumpDispense').onclick = async () => {
+    await spacebioFetch('/api/spacebio/pump/dispense', { method: 'POST', body: {
+      rate_ul_s: Number(sbEl('pumpRate').value),
+      target_volume_ul: Number(sbEl('pumpTargetVolume').value) } });
+    spacebioLog('주입 시작');
+  };
+  sbEl('pumpStop').onclick = () =>
+    spacebioFetch('/api/spacebio/pump/stop', { method: 'POST', body: {} });
+  sbEl('pumpSendSteps').onclick = async () => {
+    await spacebioFetch('/api/spacebio/pump/step', { method: 'POST', body: {
+      steps: Number(sbEl('pumpStepCount').value),
+      spm: Number(sbEl('pumpStepSpm').value) } });
+    spacebioLog('스텝 전송');
+  };
+  sbEl('pumpEmergencyStop').onclick = async () => {
+    await spacebioFetch('/api/spacebio/pump/emergency-stop', { method: 'POST', body: {} });
+    spacebioLog('비상 정지 — 래치됨');
+  };
+  sbEl('pumpResetEmergencyStop').onclick = spacebioResetEstop;
+
+
+  try {
+    spacebioRenderStatus(await spacebioFetch('/api/spacebio/status'));
+  } catch (err) {
+    spacebioSetStale(true);
+  }
+  spacebioConnect();
+  setInterval(() => {
+    spacebioSetStale(Date.now() - spacebioLastSeenAt > SPACEBIO_STALE_MS);
+  }, 1000);
+}
+
+document.addEventListener('DOMContentLoaded', spacebioInit);
+</script>
+
+<!-- ════════ 한 화면 배치 (2026-07-29) ════════════════════════════════════
+  32인치(2560×1440, 실사용 높이 약 1,320px)에 전체가 들어가게 한다.
+  실측: 재배치 전 2,426px → 후 약 1,040px.
+
+  ⚠ **런타임 재배치**다. baseline HTML 은 한 줄도 고치지 않는다는 계약이 있어
+    (test_work_copies_are_a_superset_of_the_captured_baseline) 마크업을 바꾸는
+    대신 로드 후 DOM 을 옮긴다. id 는 그대로라 기존 스크립트가 계속 동작한다.
+
+  요지: SpaceBio 패널이 클리노스텟 **전체 아래**(top 1,347)에 있어 저항 정보를
+  보려면 반드시 스크롤해야 했다. 가로는 2,133 중 581px 가 비어 있었다.
+  → 3열로 옮기고, 상시 볼 필요 없는 것(연결 설정·논문 메트릭·기록/펌프)은 접는다.
+-->
+<style>
+/* 3열은 넓은 화면에서만. 좁으면 기존처럼 쌓는다. */
+@media (min-width: 1600px) {
+  .main {
+    grid-template-columns: 320px minmax(0, 1.15fr) minmax(0, 1fr) !important;
+    align-items: start !important;
+    gap: 12px !important;
+    /* 원본은 max-width:1600px + margin:0 auto 라, 2560 모니터에서 좌우로 각각
+       약 620px 씩 비어 카드가 오른쪽으로 밀린 것처럼 보였다(헤더는 전체 폭이라
+       더 두드러진다). 화면을 실제로 쓰도록 넓힌다. */
+    max-width: min(2400px, calc(100vw - 32px)) !important;
+  }
+  #spacebioPanel { margin-top: 0 !important; }
+  /* 좁아진 열에서는 카드를 한 줄로 세운다 */
+  /* 저항센서를 절반 폭으로 줄이고 그 옆에 이벤트를 둔다.
+     이벤트 카드는 인라인 margin-top:14px 를 갖고 있어 그리드에선 지운다. */
+  #spacebioPanel .sb-grid { grid-template-columns: 1fr 1fr !important; }
+  #spacebioPanel .sb-grid .sb-event-card { margin-top: 0 !important; }
+  #spacebioPanel .sb-chart-wrap { height: 180px !important; }
+  /* 측정값 5행이 세로로 길다 — 2열로 접어 붙인다(실측 425 → 382px). */
+  #spacebioPanel .sb-readouts { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; }
+  /* 논문 메트릭 4개를 하단 전폭 한 줄로. 실시간으로 계속 보기 위함이다.
+     ⚠ .metric-paper 의 min-height:280px 이 카드 높이를 잡고 있었다
+       (.body 는 flex:1 이라 카드를 따라간다) — 그걸 풀어야 줄어든다. */
+  /* 중력벡터·taSMG가 카메라 행으로 빠졌으므로 남은 2개를 한 줄에 둔다. */
+  .metrics-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 10px !important;
+  }
+  .metrics-grid .metric-paper {
+    min-height: 0 !important;
+    height: 210px !important;
+    padding: 10px !important;
+    /* 카드를 줄이면 I(5°) 의 주석·중력벡터 플롯이 카드 밖으로 흘러나온다. */
+    overflow: hidden !important;
+  }
+  /* 중력벡터 분포는 Plotly 다. #sphereDiv 의 min-height:240px 이 카드보다 커서
+     넘쳤다 — 풀어 주면 responsive:true 가 알아서 다시 그린다. */
+  #sphereDiv { min-height: 0 !important; }
+  /* Chart.js 는 maintainAspectRatio 로 캔버스를 폭에 비례해 키운다. 카드를 줄이면
+     본문(170px)보다 캔버스(225px)가 커져 넘친다(실측 44·59px). 카드 높이에 묶는다.
+     Chart.js 가 style 로 높이를 쓰므로 !important 가 필요하다. */
+  .metrics-grid .metric-paper .body canvas {
+    height: 100% !important;
+    max-height: 100% !important;
+  }
+  .metrics-grid .metric-paper h4 {
+    font-size: 0.72em !important;
+    margin-bottom: 4px !important;
+    letter-spacing: 0 !important;
+  }
+  /* 카메라와 RPM 차트를 세로로 쌓아 각자 열 전체 폭을 쓰게 한다.
+     가로로 두면 열이 좁아 카메라가 세로로 길쭉해진다(실측 285×300). */
+  /* 카메라를 반으로 줄이고 그 옆에 중력벡터 분포를 둔다. RPM 차트는 다음 줄 전폭. */
+  .cam-chart-row { grid-template-columns: 1fr 1fr !important; }
+  .cam-chart-row .metric-paper {
+    height: 330px !important;
+    min-height: 0 !important;
+    padding: 10px !important;
+    overflow: hidden !important;
+  }
+  /* 2행 — RPM 차트도 절반 폭, 옆에 taSMG. 차트 높이(250)에 맞춰 낮춘다. */
+  .cam-chart-row .chart-card { height: 250px !important; }
+  .cam-chart-row .sb-row2-metric { height: 250px !important; }
+  /* ⚠ 종횡비로 두면 열이 넓어진 만큼 카메라가 높아져(실측 폭 1,083 → 높이 648)
+     넓힌 이득을 그대로 까먹는다. 카드 높이를 고정하고 영상이 그 안을 채우게 한다
+     (img 는 object-fit: contain 이라 비율이 깨지지 않고 레터박스로 들어간다). */
+  .cam-chart-row .cam-card { height: 330px !important; }
+  .cam-chart-row .cam-card .cam-wrap {
+    aspect-ratio: auto !important;
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+    height: auto !important;
+  }
+  .chart-card { height: 250px !important; }
+}
+/* 1600px 미만에서는 옮겨온 패널이 두 열을 모두 차지해 원래 모습이 유지된다. */
+@media (max-width: 1599px) {
+  #spacebioPanel { grid-column: 1 / -1; }
+}
+details.sb-fold > summary {
+  cursor: pointer;
+  padding: 6px 10px;
+  margin: 4px 0;
+  background: var(--surface);
+  border: 1px solid #2a2a4a;
+  border-radius: 8px;
+  font-size: .8em;
+  color: var(--text-dim);
+  list-style: none;
+}
+details.sb-fold > summary::-webkit-details-marker { display: none; }
+details.sb-fold[open] > summary { margin-bottom: 8px; }
+</style>
+<script>
+// 한 화면 배치. 요소가 없으면 조용히 넘어간다 — 배치 실패가 기능을 막으면 안 된다.
+function spacebioFoldInPlace(element, title) {
+  if (!element || element.parentElement.classList.contains('sb-fold')) return null;
+  const box = document.createElement('details');
+  box.className = 'sb-fold';
+  const head = document.createElement('summary');
+  head.textContent = title;
+  element.parentNode.insertBefore(box, element);
+  box.appendChild(head);
+  box.appendChild(element);
+  return box;
+}
+
+function spacebioApplyOneScreenLayout() {
+  const main = document.querySelector('.main');
+  const panel = document.getElementById('spacebioPanel');
+  if (!main || !panel) return;
+  if (panel.parentElement !== main) main.appendChild(panel);   // 3번째 열로
+
+  // 연결 설정: 한 번 연결하면 보지 않는다 (실측 523px)
+  const connection = Array.from(document.querySelectorAll('.panel > .card'))
+    .find((card) => /Connection/i.test(card.textContent.slice(0, 40)));
+  spacebioFoldInPlace(connection, '▸ 연결 설정 (AC Servo · BLDC · IMU)');
+
+  // 논문 메트릭 4개: 접지 않고 실시간으로 본다. 중력센서(IMU) 바로 아래에 2×2 로 둔다.
+  // 원본은 600px 폭 2×2 로 587px 를 썼는데, 카드 높이를 210px 로 묶어 380px 로 줄인다.
+  const metrics = document.querySelector('.metrics-grid');
+  const imuRow = document.querySelector('.sensor-grid');
+  if (metrics && imuRow && metrics.previousElementSibling !== imuRow) {
+    imuRow.parentNode.insertBefore(metrics, imuRow.nextSibling);
+  }
+
+  // 중력벡터 분포는 카메라 옆으로. 카메라를 절반 폭으로 줄여 그 자리를 만든다.
+  const sphere = document.getElementById('sphereDiv');
+  const camCard = document.querySelector('.cam-chart-row .cam-card');
+  const sphereCard = sphere && sphere.closest('.metric-paper');
+  if (sphereCard && camCard && sphereCard.previousElementSibling !== camCard) {
+    camCard.parentNode.insertBefore(sphereCard, camCard.nextSibling);
+  }
+
+  // RPM 차트도 절반 폭으로 줄이고 그 옆에 taSMG를 둔다.
+  const tasmg = document.getElementById('tasmgChart');
+  const chartCard = document.querySelector('.cam-chart-row .chart-card');
+  const tasmgCard = tasmg && tasmg.closest('.metric-paper');
+  if (tasmgCard && chartCard && tasmgCard.previousElementSibling !== chartCard) {
+    tasmgCard.classList.add('sb-row2-metric');
+    chartCard.parentNode.insertBefore(tasmgCard, chartCard.nextSibling);
+  }
+
+  // 이벤트는 저항센서 옆으로. 저항센서를 절반 폭으로 줄여 그 자리를 만든다.
+  const sbGrid = panel.querySelector('.sb-grid');
+  const events = document.getElementById('spacebioEvents');
+  const eventCard = events && events.closest('.sb-card');
+  if (sbGrid && eventCard && eventCard.parentNode !== sbGrid) {
+    eventCard.classList.add('sb-event-card');
+    sbGrid.appendChild(eventCard);
+  }
+
+  // 측정값 5행을 2열로 묶는다 — 세로로 나열하면 카드가 그만큼 길어진다.
+  const readoutIds = ['resistanceValue', 'resistanceDelta', 'resistanceAdc',
+                      'resistanceTemperature', 'resistanceBattery'];
+  const rows = readoutIds
+    .map((id) => (document.getElementById(id) || {}).closest?.('.sb-row'))
+    .filter(Boolean);
+  if (rows.length && !rows[0].parentElement.classList.contains('sb-readouts')) {
+    const grouped = document.createElement('div');
+    grouped.className = 'sb-readouts';
+    rows[0].parentNode.insertBefore(grouped, rows[0]);
+    rows.forEach((r) => grouped.appendChild(r));
+  }
+
+  // 기록 상태·펌프: 저항 측정 화면에서는 보조 정보다
+  const grid = panel.querySelector('.sb-grid');
+  if (grid && !panel.querySelector('.sb-fold')) {
+    const cards = Array.from(grid.children);
+    const secondary = cards.filter((c) => {
+      const t = (c.querySelector('h3') || {}).textContent || '';
+      return /기록|펌프/.test(t);
+    });
+    if (secondary.length) {
+      const holder = document.createElement('div');
+      holder.className = 'sb-grid';
+      secondary.forEach((c) => holder.appendChild(c));
+      panel.appendChild(holder);
+      spacebioFoldInPlace(holder, '▸ 기록 상태 · 펌프');
+    }
+  }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  spacebioApplyOneScreenLayout();
+  // 카드 크기가 바뀌었으니 차트(Chart.js·Plotly)에 다시 그리라고 알린다.
+  // 한 번만으로는 Plotly 가 옛 크기를 쓰는 경우가 있어 잠시 뒤 한 번 더 보낸다.
+  const nudgeCharts = () => {
+    window.dispatchEvent(new Event('resize'));
+    // Plotly 는 resize 이벤트만으로 안 따라오는 경우가 있어 자체 API 로도 부른다.
+    if (window.Plotly) {
+      document.querySelectorAll('.js-plotly-plot')
+        .forEach((el) => { try { Plotly.Plots.resize(el); } catch (e) { /* 무시 */ } });
+    }
+    if (window.Chart && Chart.getChart) {
+      document.querySelectorAll('canvas').forEach((cv) => {
+        const chart = Chart.getChart(cv);
+        if (chart) { try { chart.resize(); } catch (e) { /* 무시 */ } }
+      });
+    }
+  };
+  nudgeCharts();
+  setTimeout(nudgeCharts, 600);
+});
+</script>
+<!-- ─── 기록 관리 ────────────────────────────────────────────────────────────
+     파이에 쌓인 세션을 브라우저에서 받고 지운다. 카드를 JS로 만들어 붙이는
+     이유는 이 파일이 append-only 계약을 지켜야 해서다 — 위쪽 마크업을 건드리지
+     않는다.
+     ⚠ 삭제는 비가역이다. confirm() 대신 같은 버튼을 두 번 누르게 한다
+     (모달은 다른 자동화를 멈춰 세운다). 기록 중인 세션은 Gateway가 409로 막는다. -->
+<style>
+#spacebioArchive .sb-arch-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+#spacebioArchive .sb-arch-meta { color: var(--text-dim); font-size: 11px; font-variant-numeric: tabular-nums; }
+#spacebioArchive .sb-arch-list { max-height: 190px; overflow-y: auto; margin-top: 8px; }
+#spacebioArchive .sb-arch-row {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center; gap: 8px; padding: 5px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06); font-size: 11px;
+}
+#spacebioArchive .sb-arch-row:last-child { border-bottom: none; }
+#spacebioArchive .sb-arch-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#spacebioArchive .sb-arch-when { color: var(--text-dim); font-size: 10px; }
+#spacebioArchive .sb-arch-size { color: var(--blue); font-variant-numeric: tabular-nums; }
+#spacebioArchive button { padding: 3px 8px; font-size: 11px; width: auto; margin: 0; }
+#spacebioArchive .sb-arch-actions { display: flex; gap: 4px; }
+#spacebioArchive .sb-arch-empty { color: var(--text-dim); font-size: 11px; padding: 8px 0; }
+#spacebioArchive .sb-arch-err { color: var(--accent); font-size: 11px; min-height: 14px; }
+#spacebioArchive .sb-arch-live { color: var(--text-dim); font-size: 10px; }
+</style>
+<script>
+(function () {
+  'use strict';
+
+  const LIST_URL = '/api/spacebio/sessions';
+  const REFRESH_MS = 30000;
+  //: 두 번 눌러야 지워진다. 이 시간이 지나면 확인 상태가 풀린다.
+  const CONFIRM_WINDOW_MS = 4000;
+
+  const el = (tag, cls, text) => {
+    const node = document.createElement(tag);
+    if (cls) node.className = cls;
+    if (text !== undefined) node.textContent = text;
+    return node;
+  };
+
+  const formatBytes = (bytes) => {
+    if (!Number.isFinite(bytes)) return '-';
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(0) + ' KB';
+    return (bytes / 1024 / 1024).toFixed(1) + ' MB';
+  };
+
+  const formatWhen = (iso) => {
+    if (!iso) return '-';
+    const parsed = new Date(iso);
+    if (Number.isNaN(parsed.getTime())) return iso;
+    return parsed.toLocaleString('ko-KR', { hour12: false });
+  };
+
+  function buildCard() {
+    const card = el('div', 'sb-card');
+    card.id = 'spacebioArchive';
+    card.style.marginTop = '14px';
+
+    const head = el('div', 'sb-arch-head');
+    const title = el('h3', null, '기록 관리');
+    title.style.margin = '0';
+    const meta = el('span', 'sb-arch-meta');
+    meta.id = 'spacebioArchiveMeta';
+    const refresh = el('button', null, '새로고침');
+    refresh.id = 'spacebioArchiveRefresh';
+    head.append(title, meta, refresh);
+
+    const err = el('div', 'sb-arch-err');
+    err.id = 'spacebioArchiveError';
+    const list = el('div', 'sb-arch-list');
+    list.id = 'spacebioArchiveList';
+
+    card.append(head, err, list);
+    return card;
+  }
+
+  function renderRow(session, reload) {
+    const row = el('div', 'sb-arch-row');
+
+    const name = el('div', 'sb-arch-name');
+    name.title = session.session_id;
+    name.append(el('div', null, session.experiment_name || session.session_id));
+    const when = el('div', 'sb-arch-when', formatWhen(session.started_at));
+    if (session.active) when.append(el('span', 'sb-arch-live', ' · 기록 중'));
+    if (Number.isFinite(session.sample_rows)) {
+      when.append(el('span', 'sb-arch-live', ' · ' + session.sample_rows.toLocaleString() + '행'));
+    }
+    name.append(when);
+
+    const size = el('div', 'sb-arch-size', formatBytes(session.bytes));
+
+    const actions = el('div', 'sb-arch-actions');
+    const download = el('a', null, '받기');
+    download.href = LIST_URL + '/' + encodeURIComponent(session.session_id) + '/download';
+    download.setAttribute('download', session.session_id + '.tar.gz');
+    download.className = 'sb-arch-download';
+    download.style.cssText = 'padding:3px 8px;font-size:11px;border-radius:6px;'
+      + 'background:var(--card-2,#1e2633);color:var(--text);text-decoration:none;';
+
+    const remove = el('button', 'sb-danger', '삭제');
+    remove.dataset.stage = 'idle';
+    let timer = null;
+    remove.addEventListener('click', async () => {
+      if (remove.dataset.stage === 'idle') {
+        remove.dataset.stage = 'armed';
+        remove.textContent = '정말 삭제?';
+        timer = setTimeout(() => {
+          remove.dataset.stage = 'idle';
+          remove.textContent = '삭제';
+        }, CONFIRM_WINDOW_MS);
+        return;
+      }
+      clearTimeout(timer);
+      remove.disabled = true;
+      remove.textContent = '삭제 중';
+      await deleteSession(session.session_id);
+      reload();
+    });
+
+    actions.append(download, remove);
+    row.append(name, size, actions);
+    return row;
+  }
+
+  async function deleteSession(sessionId) {
+    const errBox = document.getElementById('spacebioArchiveError');
+    try {
+      const resp = await fetch(LIST_URL + '/' + encodeURIComponent(sessionId), {
+        method: 'DELETE',
+      });
+      if (!resp.ok) {
+        const payload = await resp.json().catch(() => null);
+        const code = payload && payload.error && payload.error.code;
+        errBox.textContent = code === 'session_active'
+          ? '기록 중인 세션은 지울 수 없습니다. 측정을 먼저 정지하세요.'
+          : '삭제 실패 (' + resp.status + ')';
+        return;
+      }
+      errBox.textContent = '';
+    } catch (e) {
+      errBox.textContent = '삭제 실패 — 게이트웨이에 닿지 못했습니다.';
+    }
+  }
+
+  async function loadSessions() {
+    const list = document.getElementById('spacebioArchiveList');
+    const meta = document.getElementById('spacebioArchiveMeta');
+    const errBox = document.getElementById('spacebioArchiveError');
+    if (!list) return;
+
+    let sessions;
+    try {
+      const resp = await fetch(LIST_URL);
+      if (!resp.ok) throw new Error('http ' + resp.status);
+      const payload = await resp.json();
+      sessions = (payload && payload.data && payload.data.sessions) || [];
+      errBox.textContent = '';
+    } catch (e) {
+      errBox.textContent = '목록을 불러오지 못했습니다.';
+      return;
+    }
+
+    const total = sessions.reduce((sum, s) => sum + (s.bytes || 0), 0);
+    meta.textContent = sessions.length + '개 · ' + formatBytes(total);
+
+    list.replaceChildren();
+    if (sessions.length === 0) {
+      list.append(el('div', 'sb-arch-empty', '기록된 세션이 없습니다.'));
+      return;
+    }
+    sessions.forEach((s) => list.append(renderRow(s, loadSessions)));
+  }
+
+  function mount() {
+    const panel = document.getElementById('spacebioPanel');
+    if (!panel || document.getElementById('spacebioArchive')) return;
+
+    const chartCard = (document.getElementById('resistanceChart') || {}).closest
+      ? document.getElementById('resistanceChart').closest('.sb-card')
+      : null;
+    const card = buildCard();
+    if (chartCard) chartCard.parentNode.insertBefore(card, chartCard.nextSibling);
+    else panel.append(card);
+
+    document.getElementById('spacebioArchiveRefresh')
+      .addEventListener('click', loadSessions);
+
+    // 측정을 멈추면 세션이 닫히면서 크기가 확정된다 — 조금 기다렸다 다시 읽는다.
+    const stopButton = document.getElementById('resistanceStop');
+    if (stopButton) stopButton.addEventListener('click', () => setTimeout(loadSessions, 1500));
+
+    loadSessions();
+    setInterval(loadSessions, REFRESH_MS);
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', mount);
+  } else {
+    mount();
+  }
+})();
+</script>
+<!-- ─── 실험명 날짜 접두사 ───────────────────────────────────────────────────
+     실험명을 "20260729-" 로 채워두고 뒤를 사용자가 잇는다. 베이스라인 마크업의
+     value="resistance-run" 은 append-only 계약 때문에 고칠 수 없어 JS로 덮는다.
+     ⚠ 자정을 넘겨 페이지를 켜 둔 채 측정을 시작하면 날짜가 어제로 남는다 —
+     그래서 측정 시작 직전(capture 단계)에 접두사만 남아 있으면 다시 찍는다. -->
+<script>
+(function () {
+  'use strict';
+
+  //: 접두사만 있고 아직 아무것도 안 쓴 상태. 이때만 마음대로 덮어쓴다.
+  const BARE_PREFIX_RE = /^\d{8}-$/;
+  //: 베이스라인 기본값. 사용자가 고른 값이 아니므로 덮어써도 된다.
+  const BASELINE_DEFAULT = 'resistance-run';
+
+  const todayPrefix = () => {
+    const now = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    return '' + now.getFullYear() + pad(now.getMonth() + 1) + pad(now.getDate()) + '-';
+  };
+
+  const input = () => document.getElementById('spacebioExperimentName');
+
+  /** 사용자가 쓴 꼬리표는 건드리지 않는다 — 비었거나 접두사뿐일 때만 다시 찍는다. */
+  function stampPrefix() {
+    const field = input();
+    if (!field || field.disabled) return;
+    const value = field.value.trim();
+    if (value !== '' && value !== BASELINE_DEFAULT && !BARE_PREFIX_RE.test(value)) return;
+    const next = todayPrefix();
+    if (field.value !== next) field.value = next;
+  }
+
+  function caretToEnd() {
+    const field = input();
+    if (!field) return;
+    const end = field.value.length;
+    try { field.setSelectionRange(end, end); } catch (e) { /* 무시 */ }
+  }
+
+  function mount() {
+    const field = input();
+    if (!field) return;
+
+    field.placeholder = todayPrefix() + '실험이름';
+    stampPrefix();
+
+    // 클릭해서 들어오면 커서를 접두사 뒤에 둔다 — 앞을 지우려고 온 게 아니다.
+    field.addEventListener('focus', () => setTimeout(caretToEnd, 0));
+
+    // 측정 시작 핸들러보다 먼저 돌아야 날짜가 최신으로 들어간다.
+    const start = document.getElementById('resistanceStart');
+    if (start) start.addEventListener('click', stampPrefix, true);
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', mount);
+  } else {
+    mount();
+  }
+})();
+</script>
+</body>
+</html>

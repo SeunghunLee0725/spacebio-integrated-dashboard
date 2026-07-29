@@ -1,0 +1,17 @@
+[Unit]
+Description=Clinostat FastAPI control server (server.py on :8000)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=aiworker-1
+Group=aiworker-1
+SupplementaryGroups=dialout plugdev
+WorkingDirectory=/home/aiworker-1/clinostat
+ExecStart=/usr/bin/python3 /home/aiworker-1/clinostat/server.py
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

@@ -27,17 +27,39 @@ integration/
 ## Python 및 의존성
 
 소스의 지원 범위는 **Python 3.10 이상, 3.15 미만**이다. 재현 가능한
-설치는 현재 검증된 다음 두 환경으로 제한된다.
+설치는 현재 검증된 다음 환경으로 제한된다.
 
 - macOS arm64, Python 3.14:
   `constraints-macos-arm64-py314-dev.txt`
-- Raspberry Pi Linux aarch64, Python 3.11:
-  `constraints-linux-aarch64-py311.txt`
+- **Raspberry Pi `clinostat-pi` 실측 환경 — Linux aarch64, Python 3.13:
+  `constraints-linux-aarch64-py313.txt`** ← 배포 대상
+- Linux aarch64, Python 3.11: `constraints-linux-aarch64-py311.txt`
+  (실기 검증되지 않음. 파이를 3.11로 재이미징할 경우에만 사용)
+
+> ⚠ 초기 계획은 파이를 Python 3.11로 가정했으나 **실제 `clinostat-pi`는
+> Python 3.13.5**다(2026-07-24 확인). 3.13 잠금 파일은 파이의 venv에서
+> `pip install --dry-run`으로 21개 패키지가 모두 해결되는 것을 확인했다.
+> 파이의 시스템 Python은 PEP 668 externally-managed이므로 **반드시 venv를
+> 쓴다.** `--break-system-packages`를 쓰지 마라.
 
 `deploy/setup.sh`는 운영체제, 아키텍처, Python 마이너 버전을 검사해 정확한
 파일만 선택하며, 검증된 조합이 아니면 시스템을 변경하기 전에 종료한다.
 Pi에서는 Linux aarch64 잠금 파일을 사용하며 Bleak의 Linux 의존성
 `dbus-fast`도 고정되어 있다.
+
+`setup.sh`는 기본적으로 venv와 의존성만 만든다. Mosquitto 브로커와 Flutter
+데스크톱 빌드 의존성은 [[DEC-012]]로 1차 런타임 경로에서 빠졌으므로
+`SPACEBIO_WITH_MQTT=1`로 실행할 때만 설치된다.
+
+Pi 잠금 갱신은 macOS의 `pip freeze`로 하지 않는다. `uv`로 대상 플랫폼을
+지정해 컴파일한다.
+
+```bash
+UV_CUSTOM_COMPILE_COMMAND='uv pip compile requirements.txt --python-platform aarch64-manylinux_2_17 --python-version 3.13 --only-binary :all: --output-file constraints-linux-aarch64-py313.txt' \
+uv pip compile requirements.txt \
+  --python-platform aarch64-manylinux_2_17 --python-version 3.13 \
+  --only-binary :all: --output-file constraints-linux-aarch64-py313.txt
+```
 
 FastAPI, Uvicorn, Pydantic, HTTPX는 다음 게이트웨이 API 단계에 필요한
 런타임 기반이므로 유지한다. Bleak도 현재 `gateway.ble_source`가 제공하는
@@ -97,12 +119,37 @@ python -m gateway.main                    # 게이트웨이 구동 (시뮬 센�
 mosquitto_sub -t 's25007/#' -v
 ```
 
-## 현재 상태 (S0)
-- 시뮬레이션 센서 소스로 전체 파이프라인(브리지·저장·폐루프) 구동 가능.
-- 실제 하드웨어(BLE 센서·펌프)는 config에서 `bleak`/`serial` 백엔드로 교체 예정(S1·S4).
+## 현재 상태 (2026-07-29, 브랜치 `feature/spacebio-integrated-dashboard`)
+
+실기에서 도는 것:
+- **BLE 저항센서** — 실측 36 Hz, `sensor_publish_hz: 50`으로 폴링을 맞췄다.
+  레퍼런스 저항 Rref·시간평균 계수 N을 화면에서 장치에 써 넣는다.
+- **통합 세션 기록** — 실험명 + 측정 시작이면 세션이 자동으로 열리고, 측정 정지에
+  닫힌다. `<data_root>/sessions/<session_id>/{manifest.json, sensor_samples.csv,
+  pump_events.jsonl}`.
+- **기록 관리** — 화면에서 세션 목록·`.tar.gz` 다운로드·삭제. 자세한 계약은 [DEPLOY.md](DEPLOY.md).
+- **한 화면 배치** — 2560×1440 기준 런타임 3열 재배치(1600px 미만이면 원래 세로 배치).
+
+아직 아닌 것:
+- **무선 펌프 모터가 돌지 않는다.** 펌웨어·무선·STEP 펄스·GPIO는 전부 정상으로
+  확인했고(90,000+ 펄스, VMOT 16 V, 코일 여자됨), 남은 구간은 드라이버 출력~모터
+  전기 경로다. 멀티미터로 XIAO D9 패드↔드라이버 STEP 핀 도통을 봐야 한다.
 - 유로 방식(밸브/볼루스/수동)은 미정 → `pump_actuator`가 소스-불문 API로 흡수. (DEC-009)
+
+## 배포
+
+새 기계에서 처음부터 올리는 절차, 파이 디렉터리 배치, systemd, BLE·방화벽 주의,
+기록 관리 API, 저장 용량 계산은 **[DEPLOY.md](DEPLOY.md)** 에 있다.
+
+```bash
+PI_HOST=<주소> PI_USER=<사용자> bash deploy/deploy_to_pi.sh
+```
 
 ## 테스트
 ```bash
-cd integration && python -m pytest tests/ -q
+cd integration && .venv/bin/python -m pytest -q      # 537개
 ```
+
+`tests/`는 게이트웨이, `clinostat_extension/tests/`는 프록시와 화면 계약을 본다.
+후자에는 **append-only 가드**가 있다 — 캡처된 베이스라인 HTML의 줄을 고치거나
+지우면 `test_work_copies_are_a_superset_of_the_captured_baseline`가 깨진다.
