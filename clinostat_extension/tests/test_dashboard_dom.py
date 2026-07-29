@@ -429,10 +429,11 @@ def test_layout_failure_does_not_break_the_page(work):
 
 
 def test_camera_stacks_above_rpm_chart_in_narrow_column(work):
-    """열이 좁아지면 가로 2분할 카메라가 세로로 길쭉해진다(실측 285×300)."""
+    """열이 좁아지면 가로 2분할 카메라가 세로로 길쭉해진다(실측 285×300).
+    세로로 쌓아 열 전체 폭을 쓰되, 높이는 따로 묶는다(아래 테스트)."""
     wide = work[work.index("@media (min-width: 1600px)"):]
     wide = wide[:wide.index(chr(10) + "}")]
-    assert "cam-chart-row" in wide and "16 / 9" in wide
+    assert "cam-chart-row { grid-template-columns: 1fr !important; }" in wide
 
 
 def test_paper_metrics_stay_visible_in_a_full_width_row(work):
@@ -457,3 +458,19 @@ def test_metric_cards_min_height_is_released(work):
 def test_charts_are_told_to_resize_after_relayout(work):
     """카드 크기가 바뀌었으니 Chart.js·Plotly 가 다시 그려야 한다."""
     assert "new Event('resize')" in work
+
+
+def test_main_uses_the_full_wide_screen(work):
+    """원본은 max-width:1600px + margin:0 auto 라 2560 모니터에서 좌우가 비고
+    카드가 오른쪽으로 밀린 것처럼 보였다(헤더는 전체 폭이라 더 두드러진다)."""
+    wide = work[work.index("@media (min-width: 1600px)"):]
+    wide = wide[:wide.index(chr(10) + "}")]
+    assert "max-width: min(2400px" in wide
+
+
+def test_camera_height_is_capped_when_widened(work):
+    """종횡비로 두면 열이 넓어진 만큼 카메라가 높아져 넓힌 이득을 까먹는다."""
+    wide = work[work.index("@media (min-width: 1600px)"):]
+    wide = wide[:wide.index(chr(10) + "}")]
+    assert "aspect-ratio: auto !important" in wide
+    assert "height: 400px !important" in wide

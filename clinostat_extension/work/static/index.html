@@ -2266,6 +2266,10 @@ document.addEventListener('DOMContentLoaded', spacebioInit);
     grid-template-columns: 320px minmax(0, 1.15fr) minmax(0, 1fr) !important;
     align-items: start !important;
     gap: 12px !important;
+    /* 원본은 max-width:1600px + margin:0 auto 라, 2560 모니터에서 좌우로 각각
+       약 620px 씩 비어 카드가 오른쪽으로 밀린 것처럼 보였다(헤더는 전체 폭이라
+       더 두드러진다). 화면을 실제로 쓰도록 넓힌다. */
+    max-width: min(2400px, calc(100vw - 32px)) !important;
   }
   #spacebioPanel { margin-top: 0 !important; }
   /* 좁아진 열에서는 카드를 한 줄로 세운다 */
@@ -2294,8 +2298,16 @@ document.addEventListener('DOMContentLoaded', spacebioInit);
   /* 카메라와 RPM 차트를 세로로 쌓아 각자 열 전체 폭을 쓰게 한다.
      가로로 두면 열이 좁아 카메라가 세로로 길쭉해진다(실측 285×300). */
   .cam-chart-row { grid-template-columns: 1fr !important; }
-  .cam-chart-row .cam-card { height: auto !important; }
-  .cam-chart-row .cam-card .cam-wrap { aspect-ratio: 16 / 9 !important; }
+  /* ⚠ 종횡비로 두면 열이 넓어진 만큼 카메라가 높아져(실측 폭 1,083 → 높이 648)
+     넓힌 이득을 그대로 까먹는다. 카드 높이를 고정하고 영상이 그 안을 채우게 한다
+     (img 는 object-fit: contain 이라 비율이 깨지지 않고 레터박스로 들어간다). */
+  .cam-chart-row .cam-card { height: 400px !important; }
+  .cam-chart-row .cam-card .cam-wrap {
+    aspect-ratio: auto !important;
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+    height: auto !important;
+  }
   .chart-card { height: 280px !important; }
 }
 /* 1600px 미만에서는 옮겨온 패널이 두 열을 모두 차지해 원래 모습이 유지된다. */
