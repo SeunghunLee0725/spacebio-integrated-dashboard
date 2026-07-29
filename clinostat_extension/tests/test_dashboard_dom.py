@@ -453,7 +453,7 @@ def test_metric_cards_min_height_is_released(work):
     wide = work[work.index("@media (min-width: 1600px)"):]
     wide = wide[:wide.index(chr(10) + "}")]
     assert "min-height: 0 !important" in wide
-    assert "repeat(3, minmax(0, 1fr))" in wide, "중력벡터가 빠져 남은 3개는 한 줄"
+    assert "repeat(2, minmax(0, 1fr))" in wide, "중력벡터·taSMG가 빠져 남은 2개는 한 줄"
 
 
 def test_charts_are_told_to_resize_after_relayout(work):
@@ -515,8 +515,14 @@ def test_sphere_card_sits_next_to_the_camera(work):
     assert "insertBefore(sphereCard, camCard.nextSibling)" in section
 
 
-def test_rpm_chart_spans_the_full_row_below(work):
-    """카메라 행이 2열이 되면 RPM 차트는 다음 줄 전체를 써야 한다."""
+def test_tasmg_sits_next_to_the_rpm_chart(work):
+    """RPM 차트도 절반 폭으로 줄이고 그 옆에 taSMG를 둔다."""
     wide = work[work.index("@media (min-width: 1600px)"):]
     wide = wide[:wide.index(chr(10) + "}")]
-    assert ".cam-chart-row .chart-card { grid-column: 1 / -1 !important; }" in wide
+    assert ".cam-chart-row .chart-card { height: 250px !important; }" in wide
+    assert ".cam-chart-row .sb-row2-metric { height: 250px !important; }" in wide
+    assert "grid-column: 1 / -1" not in wide, "차트가 전폭을 차지하면 taSMG 자리가 없다"
+
+    start = work.index("function spacebioApplyOneScreenLayout")
+    section = work[start:work.index(chr(10) + "}", start)]
+    assert "insertBefore(tasmgCard, chartCard.nextSibling)" in section
